@@ -1,3 +1,10 @@
-altair
-pandas
-streamlit
+numpy
+scipy
+matplotlib
+scikit-learn
+torch
+torchvision
+tqdm
+streamlit==1.57.0
+plotly
+openai

@@ -1,20 +1,27 @@
-FROM python:3.13.5-slim
+FROM python:3.10-slim
 
 WORKDIR /app
 
+# System deps
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    git \
+    git curl build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
-COPY src/ ./src/
+# Copy repo
+COPY . .
 
-RUN pip3 install -r requirements.txt
+# Install Python deps
+RUN pip install --no-cache-dir \
+    numpy scipy matplotlib scikit-learn \
+    torch torchvision tqdm \
+    streamlit==1.57.0 plotly openai
 
-EXPOSE 8501
+# HF Spaces runs on port 7860
+EXPOSE 7860
 
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
+ENV STREAMLIT_SERVER_PORT=7860
+ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
+ENV STREAMLIT_SERVER_HEADLESS=true
+ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 
-ENTRYPOINT ["streamlit", "run", "src/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "app.py"]

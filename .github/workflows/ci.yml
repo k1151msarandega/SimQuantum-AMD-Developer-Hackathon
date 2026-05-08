@@ -1,0 +1,170 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "phase-*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools
+          pip install numpy scipy pytest pytest-cov ruff
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install scikit-learn scikit-optimize joblib opencv-python
+          pip install -e . --no-deps
+
+      - name: Lint with ruff
+        run: ruff check qdot/ tests/
+        continue-on-error: true  # don't block on style during active dev
+
+      # ------------------------------------------------------------------
+      # Phase 0 tests (types, state, governance, HITL)
+      # ------------------------------------------------------------------
+      - name: Run Phase 0 tests
+        run: pytest tests/test_types.py tests/test_state.py -v --tb=short
+
+      # ------------------------------------------------------------------
+      # Phase 0 safety fuzz (zero violations — hard requirement)
+      # ------------------------------------------------------------------
+      - name: Safety fuzz test (required — zero violations)
+        run: pytest tests/test_safety.py::TestFuzz -v
+
+      # ------------------------------------------------------------------
+      # Phase 0 simulator tests
+      # ------------------------------------------------------------------
+      - name: Run simulator tests
+        run: pytest tests/test_simulator.py -v --tb=short
+
+      # ------------------------------------------------------------------
+      # Phase 1 perception tests
+      # ------------------------------------------------------------------
+      - name: Run Phase 1 perception tests
+        run: pytest tests/test_perception.py -v --tb=short
+
+      # ------------------------------------------------------------------
+      # Phase 1 training smoke test (must pass — not continue-on-error)
+      # ------------------------------------------------------------------
+      #- name: Phase 1 fast training check (smoke test)
+        #run: |
+          #python experiments/train_phase1.py --fast --out /tmp/phase1_ci_check
+        #timeout-minutes: 15
+        #continue-on-error: false
+
+      - name: Phase 1 data generation check (smoke test)
+        run: |
+          python - <<'PYEOF'
+          from qdot.perception.dataset import CIMDataset, DatasetConfig
+          cfg = DatasetConfig(n_per_class=50, seed=42, augment=False)
+          ds = CIMDataset(cfg)
+          X, y = ds.generate()
+          assert X.shape == (150, 1, 64, 64), f"Unexpected shape: {X.shape}"
+          assert len(set(y.tolist())) == 3, "Missing classes"
+          print(f"Data generation OK: {X.shape}, classes={set(y.tolist())}")
+          PYEOF
+        timeout-minutes: 2
+
+      # ------------------------------------------------------------------
+      # Phase 2 planning tests (belief, sensing, BO, state machine)
+      # ------------------------------------------------------------------
+      - name: Run Phase 2 planning tests
+        run: pytest tests/test_planning.py -v --tb=short
+
+      # ------------------------------------------------------------------
+      # Phase 2 agent tests (translator, executive — no HITL blocking)
+      # ------------------------------------------------------------------
+      - name: Run Phase 2 agent tests
+        run: pytest tests/test_agent.py -v --tb=short
+
+      # ------------------------------------------------------------------
+      # Phase 0/1/2 integration test (full pipeline smoke test)
+      # ------------------------------------------------------------------
+      - name: Run Phase 0/1/2 integration test
+        run: pytest tests/test_integration_phase012.py -v --tb=short
+
+      # ------------------------------------------------------------------
+      # Phase 2 full test suite with coverage
+      # ------------------------------------------------------------------
+      - name: Full test suite with coverage
+        run: |
+          pytest tests/ -v --tb=short \
+            --cov=qdot \
+            --cov-report=term-missing \
+            --cov-fail-under=70
+        continue-on-error: true   # coverage target is aspirational during active dev
+
+      # ------------------------------------------------------------------
+      # Phase 2 benchmark (full mode)
+      # Downloads trained Phase 1 checkpoint from train.yml artifact.
+      # Falls back to stub mode gracefully if artifact is unavailable.
+      # Only runs on main branch pushes (3.11 matrix only).
+      # ------------------------------------------------------------------
+      - name: Download Phase 1 checkpoint (cross-workflow)
+        id: checkpoint
+        if: github.ref == 'refs/heads/main' && matrix.python-version == '3.11'
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: train.yml
+          name: phase1-checkpoint-latest
+          path: experiments/checkpoints/phase1/
+          if_no_artifact_found: ignore
+        continue-on-error: true
+
+      - name: Report checkpoint status
+        if: github.ref == 'refs/heads/main' && matrix.python-version == '3.11'
+        continue-on-error: true
+        run: |
+          if [ -f "experiments/checkpoints/phase1/model_0.pt" ]; then
+            echo "Trained checkpoint loaded — benchmark will use real classifier"
+            echo "CHECKPOINT_READY=1" >> "$GITHUB_ENV"
+          else
+            echo "No checkpoint found — benchmark running in stub mode (smoke test only)"
+            echo "CHECKPOINT_READY=0" >> "$GITHUB_ENV"
+          fi
+
+      - name: Phase 2 benchmark (full mode)
+        if: github.ref == 'refs/heads/main' && matrix.python-version == '3.11'
+        run: |
+          if [ "${CHECKPOINT_READY:-0}" = "1" ]; then
+            python experiments/benchmark_phase2.py \
+              --budget 8192 \
+              --n-trials 50 \
+              --max-steps 100 \
+              --out /tmp/phase2_benchmark
+          else
+            python experiments/benchmark_phase2.py \
+              --budget 8192 \
+              --n-trials 50 \
+              --max-steps 100 \
+              --skip-missing-checkpoints \
+              --out /tmp/phase2_benchmark
+          fi
+        timeout-minutes: 200
+        continue-on-error: true   # benchmark is informational until fully integrated
+
+      - name: Upload Phase 2 benchmark results
+        if: always() && github.ref == 'refs/heads/main' && matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-benchmark-results
+          path: /tmp/phase2_benchmark/
+          retention-days: 7
