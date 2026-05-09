@@ -216,7 +216,7 @@ def _init():
         chat=[],
         llm_url="",   # persists across reruns
         llm_api_key="",
-        llm_model="accounts/fireworks/models/qwen3-8b",
+        llm_model="accounts/fireworks/models/qwen2p5-vl-32b-instruct",
         use_cnn=True,
         meas_budget=8096,
         max_steps=140,
@@ -226,11 +226,21 @@ def _init():
             st.session_state[k] = v
 _init()
 
-# Pull LLM URL from environment if not yet set in session
+# Pull LLM config from environment if not yet set in session
 if not st.session_state.llm_url:
-    env_url = os.environ.get("QDOT_LLM_BASE_URL","")
+    env_url = os.environ.get("QDOT_LLM_BASE_URL", "")
     if env_url:
         st.session_state.llm_url = env_url
+
+if not st.session_state.llm_api_key:
+    env_key = os.environ.get("QDOT_LLM_API_KEY", "")
+    if env_key:
+        st.session_state.llm_api_key = env_key
+
+if st.session_state.llm_model == "accounts/fireworks/models/qwen3-8b":
+    env_model = os.environ.get("QDOT_LLM_MODEL", "")
+    if env_model:
+        st.session_state.llm_model = env_model
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -316,10 +326,18 @@ def _call_qwen(user_msg: str, image_bytes: bytes | None = None) -> str:
         resp = client.chat.completions.create(
             model=model,
             messages=messages,
-            max_tokens=500,
-            temperature=0.7,
+            max_tokens=1024,
+            temperature=0.6,
         )
-        return resp.choices[0].message.content.strip()
+        raw = resp.choices[0].message.content or ""
+        # Separate reasoning from answer
+        import re as _re
+        think_match = _re.search(r"<think>(.*?)</think>", raw, flags=_re.DOTALL)
+        think_block = think_match.group(1).strip() if think_match else ""
+        clean = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL).strip()
+        # Attach reasoning to session for rendering
+        st.session_state["_last_think"] = think_block
+        return clean
 
     except ImportError:
         return ("openai package not installed. Run: pip install openai\n"
@@ -329,8 +347,8 @@ def _call_qwen(user_msg: str, image_bytes: bytes | None = None) -> str:
                 f"Check your API key and endpoint URL in the sidebar.")
 
 
-def _add_msg(role: str, content: str, kind: str = "n"):
-    st.session_state.chat.append({"role": role, "content": content, "kind": kind})
+def _add_msg(role: str, content: str, kind: str = "n", think: str = ""):
+    st.session_state.chat.append({"role": role, "content": content, "kind": kind, "think": think})
 
 
 def _handle_chat(user_msg: str):
@@ -381,7 +399,7 @@ def _handle_chat(user_msg: str):
                 "Then set the URL to http://localhost:8000 in the sidebar."
             )
 
-    _add_msg("assistant", reply)
+    _add_msg("assistant", reply, think=st.session_state.pop("_last_think", ""))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -621,8 +639,22 @@ def _render_chat():
         else:
             css = "msg msg-a msg-ev" if msg.get("kind")=="ev" else "msg msg-a"
             lbl = "Dr. Q — anomaly" if msg.get("kind")=="ev" else "Dr. Q"
+            think = msg.get("think", "")
+            think_html = ""
+            if think:
+                t = (think.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+                          .replace("\n","<br>"))
+                think_html = (
+                    f'<details style="margin-bottom:6px;cursor:pointer">'
+                    f'<summary style="font-size:10px;color:#8A9AB0;font-family:JetBrains Mono,monospace;'
+                    f'letter-spacing:0.5px;list-style:none;display:flex;align-items:center;gap:6px">'
+                    f'<span style="color:#00897B">&#9654;</span> Dr. Q\'s reasoning</summary>'
+                    f'<div style="margin-top:6px;padding:10px 12px;background:#0D1117;border-radius:6px;'
+                    f'font-size:11px;color:#5A6478;font-family:JetBrains Mono,monospace;line-height:1.6">'
+                    f'{t}</div></details>'
+                )
             msgs_html += (f'<div class="{css}"><div class="mlabel">{lbl}</div>'
-                          f'<div class="bubble">{c}</div></div>')
+                          f'<div class="bubble">{think_html}{c}</div></div>')
 
     st.markdown(
         f'<div class="chat-outer">'
