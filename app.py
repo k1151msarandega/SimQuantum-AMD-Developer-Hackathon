@@ -6,7 +6,7 @@ AMD Developer Hackathon 2026.
 Before running, set env vars (on MI300X):
 
     export QDOT_LLM_BASE_URL=http://localhost:8000/v1
-    export QDOT_LLM_MODEL=Qwen/Qwen2.5-1.5B-Instruct
+    export QDOT_LLM_MODEL=Qwen/Qwen3-8B
     streamlit run app.py --server.port 8501 --server.address 0.0.0.0
 
     Or locally (LLM offline, physics sim still runs):
@@ -166,7 +166,7 @@ PLOT_LAYOUT = dict(
 # Dr. Q system prompt — tells Qwen who it is and what the experiment is
 DR_Q_SYSTEM = """\
 You are Dr. Q, the AI co-pilot for SimQuantum — an autonomous quantum dot tuning system
-running on AMD MI300X hardware. You are Qwen2.5-1.5B-Instruct.
+running on AMD MI300X hardware. You are Qwen3-8B.
 
 Your role: have a real conversation about this experiment with whoever is asking.
 Adapt your depth to the person — a curious student gets clear analogies, an expert
@@ -395,7 +395,7 @@ def _handle_chat(user_msg: str):
                 "Qwen is not connected. Set the vLLM endpoint in the sidebar.\n\n"
                 "If you're on the MI300X, make sure vLLM is running:\n"
                 "  docker exec -it rocm /bin/bash\n"
-                "  vllm serve Qwen/Qwen2.5-1.5B-Instruct --host 0.0.0.0 --port 8000\n\n"
+                "  vllm serve Qwen/Qwen3-8B --host 0.0.0.0 --port 8000\n\n"
                 "Then set the URL to http://localhost:8000 in the sidebar."
             )
 
@@ -622,7 +622,7 @@ def _render_chat():
 
     llm_on = _llm_available()
     badge = (
-        '<span class="badge badge-mi300x">⬡ Qwen2.5 · AMD MI300X</span>'
+        '<span class="badge badge-mi300x">⬡ Qwen3-8B · AMD MI300X</span>'
         if llm_on else
         '<span class="badge badge-warn">LLM offline — set URL in sidebar</span>'
     )
@@ -770,7 +770,7 @@ with st.sidebar:
         'margin-top:16px;line-height:1.6">'
         'Physics: CIM simulator (CPU)<br>'
         'CNN: 5-model ensemble, 91.4% val acc<br>'
-        'LLM: Qwen2.5-1.5B on AMD MI300X<br>'
+        'LLM: Qwen3-8B on AMD MI300X<br>'
         'BOOTSTRAPPING→CHARGE_ID: ✓ working<br>'
         'NAVIGATION: Phase 3, in development'
         '</div>',
@@ -849,7 +849,7 @@ if exp_state is None:
             SimQuantum autonomously tunes a double quantum dot device to the
             <strong>(1,1) charge state</strong> — one electron per dot — required
             for spin qubit operation. 6-stage POMDP planner, 5-model CNN ensemble
-            (91.4% val acc), Bayesian optimisation. Qwen2.5-1.5B on AMD MI300X
+            (91.4% val acc), Bayesian optimisation. Qwen3-8B on AMD MI300X
             acts as Dr. Q — ask it anything, in any register.
           </p>
         </div>
