@@ -216,7 +216,7 @@ def _init():
         chat=[],
         llm_url="",   # persists across reruns
         llm_api_key="",
-        llm_model="accounts/fireworks/models/qwen2p5-vl-32b-instruct",
+        llm_model="accounts/fireworks/models/qwen3-8b",
         use_cnn=True,
         meas_budget=8096,
         max_steps=140,
@@ -295,7 +295,7 @@ def _call_qwen(user_msg: str, image_bytes: bytes | None = None) -> str:
     No fallbacks, no scripts. If the LLM is down, say so clearly.
     """
     url   = st.session_state.llm_url.strip().rstrip("/")
-    model = st.session_state.llm_model.strip() or "accounts/fireworks/models/qwen2p5-vl-32b-instruct"
+    model = st.session_state.llm_model.strip() or "accounts/fireworks/models/qwen3-8b"
     api_key = st.session_state.llm_api_key.strip() or os.environ.get("QDOT_LLM_API_KEY", "EMPTY")
 
     # Build system + history
