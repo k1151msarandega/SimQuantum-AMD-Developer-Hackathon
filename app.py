@@ -21,24 +21,6 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 import streamlit as st
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Asset loading — read bytes once at startup; works on HF Spaces & local
-# ─────────────────────────────────────────────────────────────────────────────
-def _load_image_bytes(rel_path: str):
-    """Return image bytes from several candidate locations, or None."""
-    candidates = [
-        Path(__file__).parent / rel_path,          # local / droplet
-        Path(rel_path),                             # relative CWD
-        Path("/app") / rel_path,                   # HF Docker /app
-        Path("/home/user/app") / rel_path,          # HF alt mount
-    ]
-    for p in candidates:
-        if p.exists():
-            return p.read_bytes()
-    return None
-
-_DIAGRAM_IMG = _load_image_bytes("assets/simquantum.png")
-
 st.set_page_config(
     page_title="SimQuantum Tuning Lab",
     page_icon="⚛",
@@ -233,7 +215,8 @@ def _init():
         done_event=None, thread=None, running=False, run_count=0,
         chat=[],
         llm_url="",   # persists across reruns
-        llm_model="Qwen/Qwen2.5-1.5B-Instruct",
+        llm_api_key="",
+        llm_model="accounts/fireworks/models/qwen2p5-vl-32b-instruct",
         use_cnn=True,
         meas_budget=8096,
         max_steps=140,
@@ -294,39 +277,46 @@ def _build_state_block() -> str:
     )
 
 
-def _call_qwen(user_msg: str) -> str:
+def _call_qwen(user_msg: str, image_bytes: bytes | None = None) -> str:
     """
-    Call Qwen directly. This is the whole thing.
-    System prompt + conversation history + user message → response.
+    Call Dr. Q. System prompt + conversation history + user message → response.
+    Supports Fireworks AI (https://api.fireworks.ai/inference/v1) and local vLLM.
+    If image_bytes provided, sends the image alongside the message (VL models).
     No fallbacks, no scripts. If the LLM is down, say so clearly.
     """
     url   = st.session_state.llm_url.strip().rstrip("/")
-    model = st.session_state.llm_model.strip() or "Qwen/Qwen2.5-1.5B-Instruct"
+    model = st.session_state.llm_model.strip() or "accounts/fireworks/models/qwen2p5-vl-32b-instruct"
+    api_key = st.session_state.llm_api_key.strip() or os.environ.get("QDOT_LLM_API_KEY", "EMPTY")
 
-    # Build messages
+    # Build system + history
     system = DR_Q_SYSTEM.format(state_block=_build_state_block())
     messages = [{"role": "system", "content": system}]
-
-    # Add conversation history (last 16 turns to stay within context)
     for msg in st.session_state.chat[-16:]:
         role = "user" if msg["role"] == "user" else "assistant"
         messages.append({"role": role, "content": msg["content"]})
 
-    # The latest user message is already in chat history at this point
-    # (added by _handle_chat before calling this function)
+    # If image provided, replace last user message content with multimodal list
+    if image_bytes and messages and messages[-1]["role"] == "user":
+        import base64
+        b64 = base64.b64encode(image_bytes).decode()
+        messages[-1]["content"] = [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+            {"type": "text", "text": messages[-1]["content"]},
+        ]
 
     try:
         import openai
-        # Handle both http://host:port and http://host:port/v1
-        api_base = url if url.endswith("/v1") else url + "/v1"
-        client = openai.OpenAI(
-            base_url=api_base,
-            api_key=os.environ.get("QDOT_LLM_API_KEY", "EMPTY"),
-        )
+        # Fireworks already includes /v1; local vLLM needs it appended
+        if "fireworks.ai" in url:
+            api_base = url  # already https://api.fireworks.ai/inference/v1
+        else:
+            api_base = url if url.endswith("/v1") else url + "/v1"
+
+        client = openai.OpenAI(base_url=api_base, api_key=api_key)
         resp = client.chat.completions.create(
             model=model,
             messages=messages,
-            max_tokens=350,
+            max_tokens=500,
             temperature=0.7,
         )
         return resp.choices[0].message.content.strip()
@@ -335,8 +325,8 @@ def _call_qwen(user_msg: str) -> str:
         return ("openai package not installed. Run: pip install openai\n"
                 "Then restart the app.")
     except Exception as exc:
-        return (f"Cannot reach Qwen at {url}.\n\nError: {exc}\n\n"
-                f"Check that vLLM is running: curl {url}/v1/models")
+        return (f"Cannot reach Dr. Q at {url}.\n\nError: {exc}\n\n"
+                f"Check your API key and endpoint URL in the sidebar.")
 
 
 def _add_msg(role: str, content: str, kind: str = "n"):
@@ -663,17 +653,27 @@ with st.sidebar:
     # LLM connection — most important, top of sidebar
     st.markdown(
         '<div style="color:#8A9AB0;font-size:10px;font-family:JetBrains Mono,monospace;'
-        'letter-spacing:1px;margin-bottom:6px">DR. Q — QWEN ENDPOINT</div>',
+        'letter-spacing:1px;margin-bottom:6px">DR. Q — ENDPOINT</div>',
         unsafe_allow_html=True,
     )
     new_url = st.text_input(
-        "vLLM base URL",
+        "Endpoint URL",
         value=st.session_state.llm_url,
-        placeholder="http://localhost:8000",
+        placeholder="https://api.fireworks.ai/inference/v1",
         label_visibility="collapsed",
     )
     if new_url != st.session_state.llm_url:
         st.session_state.llm_url = new_url
+
+    new_key = st.text_input(
+        "API Key",
+        value=st.session_state.llm_api_key,
+        placeholder="fw_xxxxxxxxxxxxxxxx",
+        type="password",
+        label_visibility="collapsed",
+    )
+    if new_key != st.session_state.llm_api_key:
+        st.session_state.llm_api_key = new_key
 
     if st.session_state.llm_url:
         st.markdown(
@@ -686,17 +686,17 @@ with st.sidebar:
             try:
                 import openai
                 url = st.session_state.llm_url.strip().rstrip("/")
-                api_base = url if url.endswith("/v1") else url + "/v1"
-                c = openai.OpenAI(base_url=api_base, api_key="EMPTY")
+                api_key = st.session_state.llm_api_key.strip() or os.environ.get("QDOT_LLM_API_KEY", "EMPTY")
+                c = openai.OpenAI(base_url=url, api_key=api_key)
                 models = c.models.list()
-                names = [m.id for m in models.data]
-                st.success(f"Connected. Models: {', '.join(names)}")
+                names = [m.id for m in models.data][:3]
+                st.success(f"Connected ✓")
             except Exception as e:
                 st.error(f"Failed: {e}")
     else:
         st.markdown(
             '<div style="font-size:10px;color:#E65100;font-family:JetBrains Mono,'
-            'monospace;margin-bottom:12px">● offline</div>',
+            'monospace;margin-bottom:12px">● offline — paste Fireworks URL + key above</div>',
             unsafe_allow_html=True,
         )
 
@@ -808,43 +808,33 @@ if exp_state is None:
                 "Ready. Set the vLLM endpoint in the sidebar to enable Qwen.\n\n"
                 "Type **start** to begin a tuning run, or ask me about the experiment.")
 
-    sl, sr = st.columns([3, 2], gap="large")
+    sl,sr = st.columns([3,2], gap="large")
     with sl:
-        # ── Hero: agent diagram ───────────────────────────────────────────────
-        if _DIAGRAM_IMG:
-            st.image(_DIAGRAM_IMG, use_container_width=True)
-        else:
-            st.markdown(
-                '<div class="card" style="text-align:center;padding:32px;color:#A8B0BC;'
-                'font-family:JetBrains Mono,monospace;font-size:11px">'
-                'assets/simquantum.png not found</div>',
-                unsafe_allow_html=True)
-
-        # ── Two info cards below the image ───────────────────────────────────
         st.markdown("""
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
-          <div class="card" style="padding:16px 18px">
-            <div class="card-title">What this system does</div>
-            <p style="font-size:12px;color:#5A6478;line-height:1.7;margin:0">
-              A team of autonomous agents tunes a quantum dot device to the
-              <strong>(1,1) charge state</strong> — one electron per dot —
-              required for spin qubit operation. 6-stage POMDP, 5-model CNN
-              (91.4% val acc), Bayesian optimisation, particle filter belief.
-              Ask Dr.&nbsp;Q anything about the experiment, in any register.
-            </p>
-          </div>
-          <div class="card" style="padding:16px 18px">
-            <div class="card-title">Reading a stability diagram</div>
-            <p style="font-size:12px;color:#5A6478;line-height:1.7;margin:0">
-              Conductance G vs gate voltages (Vg₁, Vg₂).
-              Bright lines&nbsp;= charge transitions.
-              Dark regions&nbsp;= Coulomb blockade (fixed electrons).
-              The honeycomb intersections are charge states:
-              (0,0), (1,0), (0,1), <strong>(1,1)&nbsp;← target</strong>…
-            </p>
-          </div>
+        <div class="card" style="padding:22px 24px">
+          <div class="card-title">What this system does</div>
+          <p style="font-size:13px;color:#5A6478;line-height:1.75;margin:0">
+            SimQuantum autonomously tunes a double quantum dot device to the
+            <strong>(1,1) charge state</strong> — one electron per dot — required
+            for spin qubit operation. 6-stage POMDP planner, 5-model CNN ensemble
+            (91.4% val acc), Bayesian optimisation. Qwen2.5-1.5B on AMD MI300X
+            acts as Dr. Q — ask it anything, in any register.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-title">Reading a stability diagram</div>
+          <p style="font-size:13px;color:#5A6478;line-height:1.75;margin:0">
+            Conductance G vs gate voltages (Vg₁, Vg₂).
+            Bright lines = Coulomb peaks (charge transitions).
+            Dark regions = Coulomb blockade (fixed electron number).
+            Intersections form a honeycomb: (0,0), (1,0), (0,1), <strong>(1,1)</strong>…
+            The agent navigates to the (1,1) diamond.
+          </p>
         </div>
         """, unsafe_allow_html=True)
+        img_path = Path(__file__).parent/"assets"/"simquantum.png"
+        if img_path.exists():
+            st.image(str(img_path), use_container_width=True)
     with sr:
         _render_chat()
 
@@ -927,9 +917,9 @@ else:
                     unsafe_allow_html=True)
         _spy(current_stg, bool(pending))
 
-        if _DIAGRAM_IMG:
-            with st.expander("Agent architecture diagram", expanded=False):
-                st.image(_DIAGRAM_IMG, use_container_width=True)
+        img_path = Path(__file__).parent/"assets"/"simquantum.png"
+        if img_path.exists():
+            st.image(str(img_path),use_container_width=True)
 
     with right:
         _render_chat()
