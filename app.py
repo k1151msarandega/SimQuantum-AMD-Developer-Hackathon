@@ -216,7 +216,7 @@ def _init():
         chat=[],
         llm_url="",   # persists across reruns
         llm_api_key="",
-        llm_model="accounts/fireworks/models/qwen2p5-vl-32b-instruct",
+        llm_model="accounts/fireworks/models/qwen3-8b",
         use_cnn=True,
         meas_budget=8096,
         max_steps=140,
