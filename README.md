@@ -116,7 +116,7 @@ space using ~2,400 measurements out of an 8,096 budget.
 
 ## Technical Walkthrough
 
-Full architecture writeup: [`docs/simquantum_technical_walkthrough.pdf`](docs/simquantum_technical_walkthrough.pdf)
+Full architecture writeup: [[`docs/simquantum_technical_walkthrough.pdf`](docs/simquantum_technical_walkthrough.pdf)](https://pdflink.to/5c1e4dd3/)
 
 Covers: AMD ROCm integration, vLLM deployment, agent architecture,
 infrastructure challenges, and future work.
