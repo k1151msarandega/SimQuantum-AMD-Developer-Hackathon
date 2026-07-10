@@ -1,1 +1,17 @@
-
+cat > configs/trajectory.yaml << 'EOF'
+# Scripted device trajectory for the demo run.
+# Gradual creep for most of the run, one injected discrete jump partway through.
+array_size: [2, 2]          # (rows, cols) of the dot array QArray simulates
+n_frames: 2000               # total frames in the demo run
+creep:
+  vx_range: [-5.0, 5.0]      # volts, linear sweep over the full run
+  vy_range: [-5.0, 5.0]
+  noise_std: 0.01            # small per-frame jitter on top of the linear creep
+jump:
+  at_frame: 1200              # frame index where the discrete jump is injected
+  vx_delta: 1.5               # volts, instantaneous offset applied at jump
+  vy_delta: -0.8
+stream_rate_hz:
+  start: 5                    # frames/sec at the start of the run
+  end: 200                    # ramped up over the run to outpace the serial baseline
+EOF
