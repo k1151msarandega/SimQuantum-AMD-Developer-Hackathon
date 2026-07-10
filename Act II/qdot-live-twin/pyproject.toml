@@ -1,1 +1,21 @@
+cat > pyproject.toml << 'EOF'
+[project]
+name = "qdot-twin"
+version = "0.1.0"
+description = "GPU-accelerated live digital twin of a quantum dot device with a drift-detection triage agent."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "torch",
+    "qarray",
+    "pyyaml",
+    "matplotlib",
+]
 
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+EOF
