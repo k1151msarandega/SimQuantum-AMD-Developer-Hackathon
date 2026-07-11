@@ -10,9 +10,11 @@ assumed, and not tuned to force a particular outcome.
 import time
 
 from qdot_twin.stream.generator import stream
+from qdot_twin.stream.trajectory import load_trajectory_config
 from qdot_twin.twin.serial_estimator import estimate
 from qdot_twin.twin.staleness import StalenessLog
 
+cfg = load_trajectory_config("configs/trajectory.yaml")
 log = StalenessLog()
 t_run_start = time.time()
 
@@ -36,7 +38,8 @@ import matplotlib.pyplot as plt
 
 fig, ax = plt.subplots(figsize=(10, 4))
 ax.plot(df["frame_index"], df["wall_clock_lag"])
-ax.axvline(1200, color="red", linestyle="--", label="injected jump (frame 1200)")
+ax.axvline(cfg.jump_at_frame, color="red", linestyle="--",
+           label=f"injected jump (frame {cfg.jump_at_frame})")
 ax.set_xlabel("frame index")
 ax.set_ylabel("wall-clock lag (s)")
 ax.set_title("Serial CPU baseline: staleness over the run")
