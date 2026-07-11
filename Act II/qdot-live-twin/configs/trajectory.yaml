@@ -7,16 +7,17 @@ creep:
   vy_range: [-5.0, 5.0]
   noise_std: 0.01            # small per-frame jitter on top of the linear creep
 jump:
-  # Moved from 1200 to 500 after step-4 evidence showed frames past ~900-1000
-  # sit in a flat, transition-free region of this trajectory/capacitance
-  # setup -- neither drift signal could react to a jump landing there,
-  # regardless of magnitude, because the frame content barely changes even
-  # though the voltage does. Frame 500 sits inside the region step 4
-  # directly confirmed still has real transition content (disagreement
-  # ~0.027 there, well above the ~0.001 floor reached by frame ~1000).
-  at_frame: 500
-  vx_delta: 1.5               # volts, instantaneous offset applied at jump
-  vy_delta: -0.8
+  # Decisive test: earlier attempts (frame 1200, then frame 500) showed the
+  # disagreement signal is essentially unchanged regardless of jump
+  # location -- same smooth monotonic curve either way. That rules out
+  # location as the issue. This test makes the jump magnitude large
+  # (roughly half the full sweep range) so that if the pipeline has ANY
+  # local sensitivity at all, it cannot miss it. If this still produces no
+  # visible response, that's a real finding about the detection approach,
+  # not a parameter to keep tuning.
+  at_frame: 300
+  vx_delta: 4.0
+  vy_delta: -4.0
 stream_rate_hz:
   start: 5                    # frames/sec at the start of the run
   end: 200                    # ramped up over the run to outpace the serial baseline
