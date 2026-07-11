@@ -13,19 +13,39 @@ since steps 2/3 only need realistic *compute cost and shape*, matching the
 old repo's classifier.py docstring target of "<5ms per patch on CPU".
 Step 4 is where classification accuracy would start to matter.
 """
+import contextlib
+import os
+
 import numpy as np
 import torch
 import torch.nn as nn
 
-# This CPU doesn't support the instruction set NNPACK needs, so PyTorch
-# would otherwise print a "Could not initialize NNPACK" warning on every
-# single conv forward call (once per ensemble member per frame -- floods
-# output at any real frame count). Harmless to disable: PyTorch falls back
-# to its other CPU backends (MKL-DNN etc.) regardless, same correctness.
-torch.backends.nnpack.enabled = False
-
 N_ENSEMBLE_MEMBERS = 5
 N_CLASSES = 4  # arbitrary placeholder charge-state classes; revisit in step 4
+
+
+@contextlib.contextmanager
+def _suppress_stderr():
+    """Redirect the process's stderr file descriptor to /dev/null for the
+    duration of the block.
+
+    Used because this build's "Could not initialize NNPACK" warning is a
+    low-level C++ TORCH_WARN that ignores torch.backends.nnpack.enabled --
+    that documented flag does not suppress it on this hardware/build.
+    Redirecting the raw file descriptor works regardless of where the
+    warning actually originates. Scoped tightly around just the forward
+    pass so it doesn't hide anything else.
+    """
+    stderr_fd = 2
+    saved_fd = os.dup(stderr_fd)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull_fd, stderr_fd)
+        yield
+    finally:
+        os.dup2(saved_fd, stderr_fd)
+        os.close(devnull_fd)
+        os.close(saved_fd)
 
 
 class _SmallCNN(nn.Module):
@@ -66,8 +86,9 @@ def ensemble_forward(frame: np.ndarray) -> torch.Tensor:
     """
     models = _get_ensemble()
     x = torch.from_numpy(frame).float().unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
-    with torch.no_grad():
-        outputs = torch.stack([m(x)[0] for m in models])
+    with _suppress_stderr():
+        with torch.no_grad():
+            outputs = torch.stack([m(x)[0] for m in models])
     return outputs
 
 
