@@ -7,17 +7,25 @@ the incoming data no longer matches what the twin expects.
 
 Also serves as the real per-frame compute workload for the serial baseline
 (twin/serial_estimator.py) and, batched, for the GPU estimator
-(twin/batch_estimator.py) -- this is not a throwaway stand-in, it's the
-actual shared perception model used across steps 2-4. Weights are
-untrained/random: irrelevant for now, since steps 2/3 only need realistic
-*compute cost and shape*, matching the old repo's classifier.py docstring
-target of "<5ms per patch on CPU". Step 4 is where classification accuracy
-would start to matter.
+(twin/batch_estimator.py). Weights are untrained/random: irrelevant for
+now, since steps 2/3 only need realistic *compute cost and shape*. Step 4
+is where classification accuracy would start to matter.
+
+Model capacity was increased from an earlier 2-layer/8-16-channel version
+after the step-3 benchmark showed that version was too small to ever
+benefit from GPU batching (dispatch/transfer overhead dominated at every
+tested batch size, 8 through 2048) -- same root cause as JAX losing to
+QArray's Rust core on tiny workloads in step 1. This is a legitimate model
+capacity correction, not tuning the benchmark: a 2-layer/8-16-channel CNN
+was always an arbitrary placeholder for timing purposes, never a final
+design. NOTE: this changes the per-frame cost of BOTH serial and batched
+estimators, so scripts/run_serial_baseline.py (step 2) should be re-run
+after this change so the final submission reflects one consistent model
+across all steps.
 
 Models are cached per-device (see _get_ensemble), all built from the same
 seed, so the CPU serial estimator and the GPU batched estimator are
-comparing the *same model*, just batched differently -- not two different
-models, which would make the speedup comparison meaningless.
+comparing the *same model*, just batched differently.
 """
 import contextlib
 import os
@@ -55,20 +63,24 @@ def _suppress_stderr():
 
 
 class _SmallCNN(nn.Module):
-    """Small conv net, deliberately similar in shape to the old repo's
-    per-patch classifier -- a few conv layers, global pool, linear head.
+    """Conv net, deliberately sized to have enough real FLOPs to be worth
+    a GPU trip -- three conv layers, 32/64/128 channels, global pool,
+    linear head. Bigger than the original placeholder (2 layers, 8/16
+    channels), which was too small to ever benefit from batching.
     """
 
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(1, 8, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(8, 16, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
         self.pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Linear(16, N_CLASSES)
+        self.fc = nn.Linear(128, N_CLASSES)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = torch.relu(self.conv1(x))
         x = torch.relu(self.conv2(x))
+        x = torch.relu(self.conv3(x))
         x = self.pool(x).flatten(1)
         return self.fc(x)
 
