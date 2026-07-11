@@ -39,12 +39,16 @@ def estimate_batch(frames: np.ndarray, device: str = "cuda") -> list[dict]:
     predicted_classes = torch.argmax(mean_probs, dim=-1)   # (B,)
     disagreement = probs.var(dim=0).mean(dim=-1)           # (B,)
 
+    # Move each result tensor to CPU ONCE, not per-element -- calling
+    # .item() inside the loop below (as an earlier version of this file
+    # did) forces a separate GPU->CPU sync per call: 2*B round trips
+    # instead of 2, which can erase the entire benefit of batching the
+    # compute. This was a real, measured bug, not a GPU limitation.
+    predicted_classes_cpu = predicted_classes.cpu().tolist()
+    disagreement_cpu = disagreement.cpu().tolist()
+
     now = time.time()
     return [
-        {
-            "predicted_class": int(predicted_classes[i].item()),
-            "disagreement": float(disagreement[i].item()),
-            "estimated_at": now,
-        }
-        for i in range(frames.shape[0])
+        {"predicted_class": int(pc), "disagreement": float(d), "estimated_at": now}
+        for pc, d in zip(predicted_classes_cpu, disagreement_cpu)
     ]
