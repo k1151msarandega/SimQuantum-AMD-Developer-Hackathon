@@ -33,9 +33,13 @@ all_frames = np.stack(
 ).astype(np.float32)
 print(f"Generated pool of {all_frames.shape[0]} frames, patch shape {all_frames.shape[1:]}")
 
-# Warm-up GPU call once, outside the timed sweep -- JIT/kernel-compile
-# cost, same caveat as JAX in step 1.
+# Warm-up both paths once, outside the timed sweep. GPU: JIT/kernel-compile
+# cost (same caveat as JAX in step 1). CPU: first call to estimate() builds
+# the CPU ensemble singleton (same caveat as step 2's frame-0 finding) --
+# without this, the first row of the sweep is contaminated by one-time
+# model-construction cost, not real per-frame compute cost.
 _ = estimate_batch(all_frames[:8], device="cuda")
+_ = estimate(all_frames[0])
 
 print(f"\n{'N':>6}  {'serial(s)':>10}  {'serial ms/f':>12}  {'gpu(s)':>10}  {'gpu ms/f':>10}  {'speedup':>8}")
 for n in BATCH_SIZES:
