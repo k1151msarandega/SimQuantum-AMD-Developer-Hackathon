@@ -18,7 +18,9 @@ import numpy as np
 from qdot_twin.perception.ensemble import ensemble_disagreement
 from qdot_twin.perception.ood import RollingOODDetector
 from qdot_twin.stream.generator import stream
+from qdot_twin.stream.trajectory import load_trajectory_config
 
+cfg = load_trajectory_config("configs/trajectory.yaml")
 ood = RollingOODDetector(window_size=50, z_threshold=3.0)
 
 frame_indices = []
@@ -53,12 +55,13 @@ print(f"OOD fired at frame indices (first 30 shown): {fired_indices[:30].tolist(
 
 fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
 axes[0].plot(frame_indices, disagreements)
-axes[0].axvline(1200, color="red", linestyle="--", label="injected jump (frame 1200)")
+axes[0].axvline(cfg.jump_at_frame, color="red", linestyle="--",
+                 label=f"injected jump (frame {cfg.jump_at_frame})")
 axes[0].set_ylabel("ensemble disagreement")
 axes[0].legend()
 
 axes[1].plot(frame_indices, ood_flags.astype(int))
-axes[1].axvline(1200, color="red", linestyle="--")
+axes[1].axvline(cfg.jump_at_frame, color="red", linestyle="--")
 axes[1].set_ylabel("OOD anomalous (0/1)")
 axes[1].set_xlabel("frame index")
 
