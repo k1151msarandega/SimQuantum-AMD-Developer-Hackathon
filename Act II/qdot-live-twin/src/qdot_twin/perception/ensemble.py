@@ -6,12 +6,18 @@ high disagreement is a second, independent signal that something about
 the incoming data no longer matches what the twin expects.
 
 Also serves as the real per-frame compute workload for the serial baseline
-(twin/serial_estimator.py) and, batched, for the GPU estimator (step 3) --
-this is not a throwaway stand-in, it's the actual shared perception model
-used across steps 2-4. Weights are untrained/random: irrelevant for now,
-since steps 2/3 only need realistic *compute cost and shape*, matching the
-old repo's classifier.py docstring target of "<5ms per patch on CPU".
-Step 4 is where classification accuracy would start to matter.
+(twin/serial_estimator.py) and, batched, for the GPU estimator
+(twin/batch_estimator.py) -- this is not a throwaway stand-in, it's the
+actual shared perception model used across steps 2-4. Weights are
+untrained/random: irrelevant for now, since steps 2/3 only need realistic
+*compute cost and shape*, matching the old repo's classifier.py docstring
+target of "<5ms per patch on CPU". Step 4 is where classification accuracy
+would start to matter.
+
+Models are cached per-device (see _get_ensemble), all built from the same
+seed, so the CPU serial estimator and the GPU batched estimator are
+comparing the *same model*, just batched differently -- not two different
+models, which would make the speedup comparison meaningless.
 """
 import contextlib
 import os
@@ -29,12 +35,12 @@ def _suppress_stderr():
     """Redirect the process's stderr file descriptor to /dev/null for the
     duration of the block.
 
-    Used because this build's "Could not initialize NNPACK" warning is a
-    low-level C++ TORCH_WARN that ignores torch.backends.nnpack.enabled --
-    that documented flag does not suppress it on this hardware/build.
-    Redirecting the raw file descriptor works regardless of where the
-    warning actually originates. Scoped tightly around just the forward
-    pass so it doesn't hide anything else.
+    Used because this build's "Could not initialize NNPACK" warning (a CPU
+    backend selection quirk) is a low-level C++ TORCH_WARN that ignores
+    torch.backends.nnpack.enabled -- that documented flag does not suppress
+    it on this hardware/build. Redirecting the raw file descriptor works
+    regardless of where the warning actually originates. Only relevant to
+    CPU execution; irrelevant to the GPU path but harmless there too.
     """
     stderr_fd = 2
     saved_fd = os.dup(stderr_fd)
@@ -67,15 +73,20 @@ class _SmallCNN(nn.Module):
         return self.fc(x)
 
 
-_models: list[_SmallCNN] | None = None  # lazy module-level singleton
+_model_cache: dict[str, list[_SmallCNN]] = {}  # keyed by device string
 
 
-def _get_ensemble() -> list[_SmallCNN]:
-    global _models
-    if _models is None:
-        torch.manual_seed(0)  # stable weights across calls within one run
-        _models = [_SmallCNN().eval() for _ in range(N_ENSEMBLE_MEMBERS)]
-    return _models
+def _get_ensemble(device: str = "cpu") -> list[_SmallCNN]:
+    """Return the ensemble on the requested device, building it once per
+    device and caching. Same seed regardless of device, so CPU and GPU
+    copies have identical weights -- the batched/serial comparison is
+    apples to apples.
+    """
+    if device not in _model_cache:
+        torch.manual_seed(0)
+        models = [_SmallCNN().eval().to(device) for _ in range(N_ENSEMBLE_MEMBERS)]
+        _model_cache[device] = models
+    return _model_cache[device]
 
 
 def ensemble_forward(frame: np.ndarray) -> torch.Tensor:
@@ -84,7 +95,7 @@ def ensemble_forward(frame: np.ndarray) -> torch.Tensor:
     Returns a (N_ENSEMBLE_MEMBERS, N_CLASSES) tensor of raw logits. This is
     the real per-frame cost that twin/serial_estimator.py measures.
     """
-    models = _get_ensemble()
+    models = _get_ensemble("cpu")
     x = torch.from_numpy(frame).float().unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
     with _suppress_stderr():
         with torch.no_grad():
