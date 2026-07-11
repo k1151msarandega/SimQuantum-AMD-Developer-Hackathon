@@ -7,7 +7,14 @@ creep:
   vy_range: [-5.0, 5.0]
   noise_std: 0.01            # small per-frame jitter on top of the linear creep
 jump:
-  at_frame: 1200              # frame index where the discrete jump is injected
+  # Moved from 1200 to 500 after step-4 evidence showed frames past ~900-1000
+  # sit in a flat, transition-free region of this trajectory/capacitance
+  # setup -- neither drift signal could react to a jump landing there,
+  # regardless of magnitude, because the frame content barely changes even
+  # though the voltage does. Frame 500 sits inside the region step 4
+  # directly confirmed still has real transition content (disagreement
+  # ~0.027 there, well above the ~0.001 floor reached by frame ~1000).
+  at_frame: 500
   vx_delta: 1.5               # volts, instantaneous offset applied at jump
   vy_delta: -0.8
 stream_rate_hz:
