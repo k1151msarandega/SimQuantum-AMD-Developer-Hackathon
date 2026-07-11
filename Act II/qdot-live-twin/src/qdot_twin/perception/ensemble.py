@@ -17,6 +17,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+# This CPU doesn't support the instruction set NNPACK needs, so PyTorch
+# would otherwise print a "Could not initialize NNPACK" warning on every
+# single conv forward call (once per ensemble member per frame -- floods
+# output at any real frame count). Harmless to disable: PyTorch falls back
+# to its other CPU backends (MKL-DNN etc.) regardless, same correctness.
+torch.backends.nnpack.enabled = False
+
 N_ENSEMBLE_MEMBERS = 5
 N_CLASSES = 4  # arbitrary placeholder charge-state classes; revisit in step 4
 
