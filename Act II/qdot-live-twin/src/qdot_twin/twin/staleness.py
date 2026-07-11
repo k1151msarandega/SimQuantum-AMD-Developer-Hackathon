@@ -1,4 +1,3 @@
-cat > src/qdot_twin/twin/staleness.py << 'EOF'
 """Staleness tracking: the core evaluation metric.
 
 Logs two parallel series over the run, sharing an x-axis (frame index / time):
@@ -24,4 +23,3 @@ class StalenessLog:
     def to_dataframe(self):
         """Return a tidy dataframe for plotting (see metrics.py)."""
         raise NotImplementedError
-EOF

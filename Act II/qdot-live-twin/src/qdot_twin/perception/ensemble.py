@@ -1,4 +1,3 @@
-cat > src/qdot_twin/perception/ensemble.py << 'EOF'
 """Ensemble-disagreement signal, repointed from the old repo's classifier.py.
 
 Old question: how much do ensemble members disagree on charge-state ID?
@@ -12,4 +11,3 @@ import numpy as np
 def ensemble_disagreement(frame: np.ndarray) -> float:
     """Return a disagreement score in [0, 1] across ensemble members."""
     raise NotImplementedError
-EOF

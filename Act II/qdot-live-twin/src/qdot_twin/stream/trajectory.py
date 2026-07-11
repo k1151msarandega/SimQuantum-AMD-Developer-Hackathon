@@ -1,4 +1,3 @@
-cat > src/qdot_twin/stream/trajectory.py << 'EOF'
 """Scripted device trajectory: gate voltages as a function of frame index.
 
 Pure function of (frame_index, config) -> (Vx, Vy). No I/O, no state —
@@ -31,4 +30,3 @@ def voltage_at(frame_index: int, cfg: TrajectoryConfig) -> tuple[float, float]:
 def load_trajectory_config(path: str) -> TrajectoryConfig:
     """Load a TrajectoryConfig from a YAML file (e.g. configs/trajectory.yaml)."""
     raise NotImplementedError
-EOF

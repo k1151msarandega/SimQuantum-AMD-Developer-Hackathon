@@ -1,4 +1,3 @@
-cat > src/qdot_twin/twin/batch_estimator.py << 'EOF'
 """PyTorch/ROCm batched state estimator. The MI300X payoff.
 
 Same job as serial_estimator.estimate, but processes a batch of queued
@@ -16,4 +15,3 @@ def estimate_batch(frames: torch.Tensor, device: str = "cuda") -> list:
     the CUDA device string as its API surface.
     """
     raise NotImplementedError
-EOF

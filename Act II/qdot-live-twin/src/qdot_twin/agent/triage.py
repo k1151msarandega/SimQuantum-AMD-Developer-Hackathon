@@ -1,4 +1,3 @@
-cat > src/qdot_twin/agent/triage.py << 'EOF'
 """Triage agent: the real decision-making piece.
 
 Consumes real signals -- queue depth, time-since-last-full-update, and
@@ -34,4 +33,3 @@ def decide(queue_depth: int, time_since_full_update: float, recent_drift_activit
     makes the decision non-trivial.
     """
     raise NotImplementedError
-EOF

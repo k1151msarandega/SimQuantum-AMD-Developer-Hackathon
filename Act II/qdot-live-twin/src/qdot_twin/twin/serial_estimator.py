@@ -1,4 +1,3 @@
-cat > src/qdot_twin/twin/serial_estimator.py << 'EOF'
 """CPU, one-frame-at-a-time state estimator. The honest baseline.
 
 This exists to produce real, measured evidence of the twin falling behind
@@ -16,5 +15,3 @@ class TwinState(dict):
 def estimate(frame: np.ndarray) -> TwinState:
     """Turn a single raw frame into a state estimate. CPU, serial, no batching."""
     raise NotImplementedError
-EOF
-

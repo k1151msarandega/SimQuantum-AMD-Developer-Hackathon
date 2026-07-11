@@ -1,4 +1,3 @@
-cat > src/qdot_twin/perception/ood.py << 'EOF'
 """Out-of-distribution detector, repointed from the old repo.
 
 Old question: does this frame match the training distribution of valid
@@ -22,5 +21,3 @@ class RollingOODDetector:
     def update_and_check(self, frame: np.ndarray) -> bool:
         """Returns True if `frame` looks anomalous relative to the rolling window."""
         raise NotImplementedError
-EOF
-

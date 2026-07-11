@@ -1,4 +1,3 @@
-cat > configs/trajectory.yaml << 'EOF'
 # Scripted device trajectory for the demo run.
 # Gradual creep for most of the run, one injected discrete jump partway through.
 array_size: [2, 2]          # (rows, cols) of the dot array QArray simulates
@@ -14,4 +13,3 @@ jump:
 stream_rate_hz:
   start: 5                    # frames/sec at the start of the run
   end: 200                    # ramped up over the run to outpace the serial baseline
-EOF

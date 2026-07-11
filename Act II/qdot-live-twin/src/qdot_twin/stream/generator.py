@@ -1,4 +1,3 @@
-cat > src/qdot_twin/stream/generator.py << 'EOF'
 """QArray-backed frame stream: plays the role of 'the real device'.
 
 Wraps QArray's charge-sensor simulation to emit (frame, ground_truth_state,
@@ -26,4 +25,3 @@ def stream(config_path: str) -> Iterator[Frame]:
     later frames are deliberately not.
     """
     raise NotImplementedError
-EOF
