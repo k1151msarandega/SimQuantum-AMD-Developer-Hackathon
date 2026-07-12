@@ -157,10 +157,18 @@ class LLMSupervisor:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": _summarize(window)},
                 ],
-                max_tokens=200,
+                max_tokens=600,
                 temperature=0.2,
+                extra_body={"reasoning_effort": "low"},
             )
-            text = resp.choices[0].message.content.strip()
+            # gpt-oss-20b is a reasoning model (Harmony format): if it spends
+            # its whole token budget on internal chain-of-thought without ever
+            # emitting a final answer, .content comes back None rather than
+            # raising -- guard explicitly instead of letting .strip() crash.
+            content = resp.choices[0].message.content
+            if not content:
+                raise ValueError("empty response content (model likely exhausted max_tokens on reasoning)")
+            text = content.strip()
             if text.startswith("```"):
                 text = text.strip("`")
                 if text.startswith("json"):
