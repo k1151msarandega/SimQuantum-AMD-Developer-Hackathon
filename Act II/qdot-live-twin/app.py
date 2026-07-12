@@ -323,8 +323,9 @@ with tab_supervisor:
         if not events:
             st.warning(
                 "The supervisor thread ran but never fired \u2014 typically means the run was too short "
-                "for its 3s cadence, or the rolling history window (5+ decisions) never filled. "
-                "Try the full-length config."
+                "for its 1s cadence, or the rolling history window (3+ decisions) never filled. "
+                "Try the full-length config, and make sure the app process was restarted after the "
+                "latest code changes (git pull alone does not reload an already-running process)."
             )
         else:
             st.caption(
