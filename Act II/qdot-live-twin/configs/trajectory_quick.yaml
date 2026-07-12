@@ -1,0 +1,16 @@
+# Scripted device trajectory for FAST interactive iteration (Streamlit app, live demo clicks).
+# Same shape as trajectory.yaml, scaled down so a run finishes in seconds, not ~45-50s.
+# Use trajectory.yaml (not this file) for the final submitted staleness-comparison chart.
+array_size: [2, 2]
+n_frames: 300
+creep:
+  vx_range: [-5.0, 5.0]
+  vy_range: [-5.0, 5.0]
+  noise_std: 0.01
+jump:
+  at_frame: 45
+  vx_delta: 4.0
+  vy_delta: -4.0
+stream_rate_hz:
+  start: 5
+  end: 2000
