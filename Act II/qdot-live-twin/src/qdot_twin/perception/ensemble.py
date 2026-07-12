@@ -11,21 +11,15 @@ Also serves as the real per-frame compute workload for the serial baseline
 now, since steps 2/3 only need realistic *compute cost and shape*. Step 4
 is where classification accuracy would start to matter.
 
-Model capacity was increased from an earlier 2-layer/8-16-channel version
-after the step-3 benchmark showed that version was too small to ever
-benefit from GPU batching (dispatch/transfer overhead dominated at every
-tested batch size, 8 through 2048) -- same root cause as JAX losing to
-QArray's Rust core on tiny workloads in step 1. This is a legitimate model
-capacity correction, not tuning the benchmark: a 2-layer/8-16-channel CNN
-was always an arbitrary placeholder for timing purposes, never a final
-design. NOTE: this changes the per-frame cost of BOTH serial and batched
-estimators, so scripts/run_serial_baseline.py (step 2) should be re-run
-after this change so the final submission reflects one consistent model
-across all steps.
-
 Models are cached per-device (see _get_ensemble), all built from the same
 seed, so the CPU serial estimator and the GPU batched estimator are
 comparing the *same model*, just batched differently.
+
+ensemble_forward supports running a SUBSET of members (n_members) -- this
+is what the triage agent's CHEAP tier uses (twin/serial_estimator.py's
+estimate_cheap): genuinely less of the same real computation, not a
+different heuristic, so its output stays directly comparable to the FULL
+tier's.
 """
 import contextlib
 import os
@@ -65,8 +59,7 @@ def _suppress_stderr():
 class _SmallCNN(nn.Module):
     """Conv net, deliberately sized to have enough real FLOPs to be worth
     a GPU trip -- three conv layers, 32/64/128 channels, global pool,
-    linear head. Bigger than the original placeholder (2 layers, 8/16
-    channels), which was too small to ever benefit from batching.
+    linear head.
     """
 
     def __init__(self):
@@ -101,13 +94,21 @@ def _get_ensemble(device: str = "cpu") -> list[_SmallCNN]:
     return _model_cache[device]
 
 
-def ensemble_forward(frame: np.ndarray) -> torch.Tensor:
-    """Run all ensemble members on a single frame (CPU, unbatched).
+def ensemble_forward(frame: np.ndarray, n_members: int | None = None) -> torch.Tensor:
+    """Run ensemble members on a single frame (CPU, unbatched).
 
-    Returns a (N_ENSEMBLE_MEMBERS, N_CLASSES) tensor of raw logits. This is
-    the real per-frame cost that twin/serial_estimator.py measures.
+    n_members: how many of the N_ENSEMBLE_MEMBERS to actually run. None (or
+    N_ENSEMBLE_MEMBERS) runs the full ensemble -- the FULL tier. A smaller
+    number runs genuinely less compute, proportionally -- the CHEAP tier.
+    Always uses the FIRST n_members models (same seed -> same models every
+    call, so results are reproducible/comparable across calls).
+
+    Returns a (n_members, N_CLASSES) tensor of raw logits.
     """
     models = _get_ensemble("cpu")
+    if n_members is not None:
+        models = models[:n_members]
+
     x = torch.from_numpy(frame).float().unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
     with _suppress_stderr():
         with torch.no_grad():
@@ -118,6 +119,9 @@ def ensemble_forward(frame: np.ndarray) -> torch.Tensor:
 def ensemble_disagreement(frame: np.ndarray) -> float:
     """Return a disagreement score across ensemble members: mean variance of
     their predicted class probabilities. High variance = members disagree.
+
+    Always uses the full ensemble -- this is the drift-flag signal, not
+    subject to the triage agent's cost tradeoffs.
     """
     outputs = ensemble_forward(frame)
     probs = torch.softmax(outputs, dim=-1)
