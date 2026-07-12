@@ -9,6 +9,8 @@ dependencies = [
     "qarray",
     "pyyaml",
     "matplotlib",
+    "openai",
+    "qcodes",
 ]
 
 [build-system]
