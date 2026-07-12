@@ -209,6 +209,15 @@ with tab_overview:
             st.error(f"{MODE_LABELS[mode]} failed: {r['error']}")
 
         if results:
+            configs_used = {r["config"] for r in results.values()}
+            if len(configs_used) > 1:
+                st.warning(
+                    "Results below mix different trajectory configs (quick/300-frame and full/2000-frame runs). "
+                    "Worst-case lag and wall time are **not directly comparable** across a config mismatch. "
+                    "Click **Clear results**, pick one config in the sidebar, and re-run all modes together "
+                    "for an apples-to-apples comparison.",
+                    icon="⚠️",
+                )
             # --- KPI row -------------------------------------------------
             ordered_kpi = [m for m in MODE_ORDER if m in results]
             kpi_cols = st.columns(len(ordered_kpi))
@@ -217,6 +226,7 @@ with tab_overview:
                 df = r["log"].to_dataframe()
                 with col:
                     st.markdown(f'<div class="section-label">{MODE_LABELS[mode]}</div>', unsafe_allow_html=True)
+                    st.caption(f"config: {r['config'].split('/')[-1]}")
                     st.metric("Worst-case lag", f"{df['wall_clock_lag'].max():.3f} s")
                     st.metric("Mean lag", f"{df['wall_clock_lag'].mean():.3f} s")
                     sub1, sub2 = st.columns(2)
@@ -248,14 +258,31 @@ with tab_overview:
                     ),
                     row=i, col=1,
                 )
-            fig.update_yaxes(matches="y", title_text="lag (s)")
+            fig.update_yaxes(matches="y", type="log", title_text="lag (s), log scale")
             fig.update_xaxes(title_text="frame index", row=len(ordered), col=1)
             fig.update_layout(
                 height=220 * len(ordered), margin=dict(l=60, r=20, t=40, b=40),
                 template="plotly_white",
-                title="Staleness comparison \u2014 wall-clock lag per frame (same y-scale across modes, deliberately)",
+                title="Staleness comparison \u2014 wall-clock lag per frame (same log-scaled y-axis across modes, deliberately)",
             )
             st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("What am I looking at? (read before judging)", expanded=True):
+                st.markdown(
+                    "- **Serial (CPU baseline):** one frame processed at a time, immediately, no batching. "
+                    "Bounded lag, but throughput-limited — the naive floor.\n"
+                    "- **GPU batched (no triage):** every flush interval, whatever's buffered gets a real GPU "
+                    "batch inference pass. Real per-frame speedup, but nothing sheds load — as the stream "
+                    "accelerates toward 2000Hz, backlog can build unboundedly, spiking worst-case lag.\n"
+                    "- **GPU batched + triage:** a rule-based agent watches queue depth, staleness, and drift, "
+                    "and switches to CHEAP or SKIP tiers under load instead of always running FULL — this is "
+                    "what caps worst-case lag even though raw GPU batching above can spike.\n"
+                    "- **GPU batched + triage + LLM supervisor:** same triage agent, but a background LLM "
+                    "reads recent backlog trends and tunes the FULL/CHEAP/SKIP thresholds instead of static "
+                    "defaults — see the *LLM supervisor* tab for exactly what it changed and why.\n\n"
+                    "Y-axis is **log-scaled and shared** across all four panels on purpose, so a real order-of-"
+                    "magnitude difference is visible, without letting any one panel auto-scale to flatter itself."
+                )
 
             # --- Tier routing bar chart, for modes that have it ----------
             triage_modes = [m for m in ordered if results[m]["tier_counts"]]
