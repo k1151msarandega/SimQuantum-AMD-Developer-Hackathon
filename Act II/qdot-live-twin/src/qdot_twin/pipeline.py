@@ -1,11 +1,19 @@
 """Wires stream -> twin -> staleness -> drift -> triage into three runnable modes.
 
 Modes:
-  "serial"          -- FULL tier only, one frame at a time, CPU (step 2's baseline)
-  "batched"         -- FULL tier only, micro-batched on GPU, no triage
-  "batched_triage"  -- micro-batched on GPU, triage agent picks FULL/CHEAP/SKIP
-                        per micro-batch using real queue depth, real staleness,
-                        and a real drift signal (perception/ood.py)
+  "serial"              -- FULL tier only, one frame at a time, CPU (step 2's baseline)
+  "batched"             -- FULL tier only, micro-batched on GPU, no triage
+  "batched_triage"      -- micro-batched on GPU, triage agent picks FULL/CHEAP/SKIP
+                            per micro-batch using real queue depth, real staleness,
+                            and a real drift signal (perception/ood.py), with static
+                            rule-based thresholds (agent/triage.py)
+  "batched_triage_llm"  -- same as batched_triage, except the three thresholds
+                            (agent/thresholds.py) are tuned in the background by an
+                            LLM supervisor (agent/llm_supervisor.py) reasoning over
+                            recent backlog/staleness/drift trends. The LLM runs on
+                            its own slow cadence in a background thread and never
+                            sits in this hot loop -- see llm_supervisor.py's
+                            module docstring for why. Requires FIREWORKS_API_KEY.
 
 MICRO-BATCHING DESIGN NOTE (read before changing this file):
 stream() is a blocking, real-time-paced generator running in this same
@@ -65,7 +73,7 @@ def _run_serial(config_path: str) -> StalenessLog:
     return log
 
 
-def _run_batched(config_path: str, use_triage: bool):
+def _run_batched(config_path: str, use_triage: bool, llm_supervised: bool = False):
     log = StalenessLog()
     buffer: list = []
     last_flush_time = time.time()
@@ -76,6 +84,32 @@ def _run_batched(config_path: str, use_triage: bool):
     tier_counts = {"FULL": 0, "CHEAP": 0, "SKIP": 0}
     max_queue_depth_seen = 0
 
+    thresholds = None
+    history = None
+    supervisor = None
+    if llm_supervised:
+        from qdot_twin.agent.thresholds import TriageThresholds
+        from qdot_twin.agent.llm_supervisor import LLMSupervisor, RollingHistory
+        thresholds = TriageThresholds()
+        history = RollingHistory()
+        supervisor = LLMSupervisor(thresholds, history)
+        supervisor.start()
+
+    try:
+        return _run_batched_loop(
+            config_path, use_triage, log, buffer, last_flush_time,
+            last_full_update_time, ood, recent_drift_flags, tier_counts,
+            max_queue_depth_seen, thresholds, history, supervisor,
+        )
+    finally:
+        if supervisor is not None:
+            supervisor.stop()
+
+
+def _run_batched_loop(
+    config_path, use_triage, log, buffer, last_flush_time, last_full_update_time,
+    ood, recent_drift_flags, tier_counts, max_queue_depth_seen, thresholds, history, supervisor,
+):
     for frame in stream(config_path):
         buffer.append(frame)
 
@@ -98,7 +132,9 @@ def _run_batched(config_path: str, use_triage: bool):
             queue_depth = len(buffer)
             time_since_full = now - last_full_update_time
             recent_drift_activity = any(recent_drift_flags)
-            tier = decide(queue_depth, time_since_full, recent_drift_activity)
+            tier = decide(queue_depth, time_since_full, recent_drift_activity, thresholds=thresholds)
+            if history is not None:
+                history.record(queue_depth, time_since_full, recent_drift_activity, tier.name)
         else:
             tier = Tier.FULL
 
@@ -126,18 +162,29 @@ def _run_batched(config_path: str, use_triage: bool):
             log.record(frame_index=f.frame_index, t=completion_time,
                        lag=completion_time - f.emitted_at)
 
-    return log, tier_counts, max_queue_depth_seen
+    supervisor_events = supervisor.events if supervisor is not None else None
+    return log, tier_counts, max_queue_depth_seen, supervisor_events
 
 
-def run(mode: Literal["serial", "batched", "batched_triage"], config_path: str):
+def run(mode: Literal["serial", "batched", "batched_triage", "batched_triage_llm"], config_path: str):
     if mode == "serial":
         return _run_serial(config_path)
     elif mode == "batched":
-        log, tier_counts, max_q = _run_batched(config_path, use_triage=False)
+        log, tier_counts, max_q, _ = _run_batched(config_path, use_triage=False)
         return log
     elif mode == "batched_triage":
-        log, tier_counts, max_q = _run_batched(config_path, use_triage=True)
+        log, tier_counts, max_q, _ = _run_batched(config_path, use_triage=True)
         print(f"  tier decisions: {tier_counts}  (max queue depth seen: {max_q})")
+        return log
+    elif mode == "batched_triage_llm":
+        log, tier_counts, max_q, events = _run_batched(config_path, use_triage=True, llm_supervised=True)
+        print(f"  tier decisions: {tier_counts}  (max queue depth seen: {max_q})")
+        if events:
+            print(f"  LLM supervisor made {len(events)} threshold updates:")
+            for ev in events:
+                print(f"    {ev.old} -> {ev.new}  ({ev.reasoning})")
+        else:
+            print("  LLM supervisor never fired (run too short for its interval, or no window yet)")
         return log
     else:
         raise ValueError(f"unknown mode: {mode!r}")
