@@ -193,15 +193,17 @@ def run(mode: Literal["serial", "batched", "batched_triage", "batched_triage_llm
     if mode == "serial":
         return _run_serial(config_path)
     elif mode == "batched":
-        log, tier_counts, max_q, _ = _run_batched(config_path, use_triage=False)
+        log, tier_counts, max_q, _, tier_compute_s = _run_batched(config_path, use_triage=False)
         return log
     elif mode == "batched_triage":
-        log, tier_counts, max_q, _ = _run_batched(config_path, use_triage=True)
+        log, tier_counts, max_q, _, tier_compute_s = _run_batched(config_path, use_triage=True)
         print(f"  tier decisions: {tier_counts}  (max queue depth seen: {max_q})")
+        print(f"  tier compute time (s): {tier_compute_s}")
         return log
     elif mode == "batched_triage_llm":
-        log, tier_counts, max_q, events = _run_batched(config_path, use_triage=True, llm_supervised=True)
+        log, tier_counts, max_q, events, tier_compute_s = _run_batched(config_path, use_triage=True, llm_supervised=True)
         print(f"  tier decisions: {tier_counts}  (max queue depth seen: {max_q})")
+        print(f"  tier compute time (s): {tier_compute_s}")
         if events:
             print(f"  LLM supervisor made {len(events)} threshold updates:")
             for ev in events:
@@ -215,22 +217,24 @@ def run(mode: Literal["serial", "batched", "batched_triage", "batched_triage_llm
 
 def run_detailed(mode: Literal["serial", "batched", "batched_triage", "batched_triage_llm"], config_path: str):
     """Like run(), but also returns tier_counts / max_queue_depth / LLM-supervisor
-    events where applicable. run() stays the simple single-log interface that
-    run_full_demo.py and other existing scripts already depend on; this exists
-    for app.py's dashboard, which needs the extra detail to display.
+    events / per-tier compute time where applicable. run() stays the simple
+    single-log interface that run_full_demo.py and other existing scripts
+    already depend on; this exists for app.py's dashboard, which needs the
+    extra detail to display.
 
-    Returns (log, tier_counts_or_None, max_queue_depth_or_None, events_or_None).
+    Returns (log, tier_counts_or_None, max_queue_depth_or_None, events_or_None,
+    tier_compute_s_or_None).
     """
     if mode == "serial":
-        return _run_serial(config_path), None, None, None
+        return _run_serial(config_path), None, None, None, None
     elif mode == "batched":
-        log, tier_counts, max_q, events = _run_batched(config_path, use_triage=False)
-        return log, None, max_q, None
+        log, tier_counts, max_q, events, tier_compute_s = _run_batched(config_path, use_triage=False)
+        return log, None, max_q, None, tier_compute_s
     elif mode == "batched_triage":
-        log, tier_counts, max_q, events = _run_batched(config_path, use_triage=True)
-        return log, tier_counts, max_q, events
+        log, tier_counts, max_q, events, tier_compute_s = _run_batched(config_path, use_triage=True)
+        return log, tier_counts, max_q, events, tier_compute_s
     elif mode == "batched_triage_llm":
-        log, tier_counts, max_q, events = _run_batched(config_path, use_triage=True, llm_supervised=True)
-        return log, tier_counts, max_q, events
+        log, tier_counts, max_q, events, tier_compute_s = _run_batched(config_path, use_triage=True, llm_supervised=True)
+        return log, tier_counts, max_q, events, tier_compute_s
     else:
         raise ValueError(f"unknown mode: {mode!r}")
