@@ -69,7 +69,7 @@ def _run_serial(config_path: str) -> StalenessLog:
     for frame in stream(config_path):
         estimate(frame.data)  # FULL tier, one frame at a time, CPU
         now = time.time()
-        log.record(frame_index=frame.frame_index, t=now, lag=now - frame.emitted_at)
+        log.record(frame_index=frame.frame_index, t=now, lag=now - frame.emitted_at, tier="FULL")
     return log
 
 
@@ -82,6 +82,12 @@ def _run_batched(config_path: str, use_triage: bool, llm_supervised: bool = Fals
     ood = RollingOODDetector()
     recent_drift_flags: list[bool] = []
     tier_counts = {"FULL": 0, "CHEAP": 0, "SKIP": 0}
+    # Real measured wall-clock compute time spent per tier -- separate from
+    # tier_counts (how many times a tier was chosen). Added alongside the
+    # tier-tagging fix below: the open question wasn't just "does triage
+    # fire" but "does the tier it picks actually cost less," and that can
+    # only be answered by measuring, not assuming CHEAP/SKIP are cheap.
+    tier_compute_s = {"FULL": 0.0, "CHEAP": 0.0, "SKIP": 0.0}
     max_queue_depth_seen = 0
 
     thresholds = None
@@ -100,6 +106,7 @@ def _run_batched(config_path: str, use_triage: bool, llm_supervised: bool = Fals
             config_path, use_triage, log, buffer, last_flush_time,
             last_full_update_time, ood, recent_drift_flags, tier_counts,
             max_queue_depth_seen, thresholds, history, supervisor,
+            tier_compute_s,
         )
     finally:
         if supervisor is not None:
@@ -109,6 +116,7 @@ def _run_batched(config_path: str, use_triage: bool, llm_supervised: bool = Fals
 def _run_batched_loop(
     config_path, use_triage, log, buffer, last_flush_time, last_full_update_time,
     ood, recent_drift_flags, tier_counts, max_queue_depth_seen, thresholds, history, supervisor,
+    tier_compute_s,
 ):
     for frame in stream(config_path):
         buffer.append(frame)
@@ -140,6 +148,10 @@ def _run_batched_loop(
 
         tier_counts[tier.name] += 1
 
+        # Measure real wall-clock compute cost per tier -- this is the
+        # number that actually answers "is CHEAP/SKIP saving anything,"
+        # not just "was CHEAP/SKIP chosen."
+        t_compute_start = time.perf_counter()
         if tier is Tier.FULL:
             estimate_batch(_stack(buffer), device="cuda")
             last_full_update_time = time.time()
@@ -147,23 +159,34 @@ def _run_batched_loop(
             estimate_batch(_stack(buffer), device="cuda", n_members=CHEAP_N_MEMBERS)
         # Tier.SKIP: no compute spent -- see module docstring on why this
         # drops the buffer rather than deferring it.
+        tier_compute_s[tier.name] += time.perf_counter() - t_compute_start
 
         completion_time = time.time()
+        # tier is tagged per-record now (previously this logged every
+        # buffered frame identically regardless of tier, so a SKIP'd frame
+        # -- never actually estimated -- looked exactly like a real FULL/
+        # CHEAP completion in the log and on the chart). SKIP'd frames are
+        # still logged (their lag is real: how stale they were when
+        # dropped), just tagged so the app can render them distinctly
+        # instead of as phantom completions.
         for f in buffer:
             log.record(frame_index=f.frame_index, t=completion_time,
-                       lag=completion_time - f.emitted_at)
+                       lag=completion_time - f.emitted_at, tier=tier.name)
         buffer = []
 
-    # Flush whatever's left when the stream ends.
+    # Flush whatever's left when the stream ends. Always a real FULL pass
+    # (not tier-decided), so tag it accordingly.
     if buffer:
+        t_compute_start = time.perf_counter()
         estimate_batch(_stack(buffer), device="cuda")
+        tier_compute_s["FULL"] += time.perf_counter() - t_compute_start
         completion_time = time.time()
         for f in buffer:
             log.record(frame_index=f.frame_index, t=completion_time,
-                       lag=completion_time - f.emitted_at)
+                       lag=completion_time - f.emitted_at, tier="FULL")
 
     supervisor_events = supervisor.events if supervisor is not None else None
-    return log, tier_counts, max_queue_depth_seen, supervisor_events
+    return log, tier_counts, max_queue_depth_seen, supervisor_events, tier_compute_s
 
 
 def run(mode: Literal["serial", "batched", "batched_triage", "batched_triage_llm"], config_path: str):
