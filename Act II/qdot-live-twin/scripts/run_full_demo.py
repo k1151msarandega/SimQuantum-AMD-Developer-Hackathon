@@ -6,9 +6,33 @@ each taking roughly the same wall-clock time as the others since all three
 are bound by the same real-time frame-arrival pacing in stream(), not by
 processing speed -- expect ~45-50s per mode, ~2.5 minutes total.
 """
+import numpy as np
+
 from qdot_twin.metrics import plot_staleness_comparison
 from qdot_twin.pipeline import run
 from qdot_twin.stream.trajectory import load_trajectory_config
+from qdot_twin.twin.batch_estimator import estimate_batch
+from qdot_twin.twin.serial_estimator import estimate
+
+
+def _warmup():
+    """Pay all one-time costs (CPU ensemble construction, GPU ensemble
+    construction + transfer, first-call kernel compilation on both
+    devices) BEFORE any timed run starts. Without this, whichever mode
+    happens to run first absorbs a large, misleading one-time cost in its
+    max lag -- exactly what happened when "batched" ran before
+    "batched_triage" and inherited none of the cold-start cost purely
+    because of run order, not because either mode is actually better at
+    avoiding it.
+    """
+    dummy_frame = np.zeros((32, 32), dtype=np.float32)
+    dummy_batch = np.zeros((4, 32, 32), dtype=np.float32)
+    estimate(dummy_frame)
+    estimate_batch(dummy_batch, device="cuda")
+
+
+print("Warming up CPU and GPU ensembles...")
+_warmup()
 
 cfg = load_trajectory_config("configs/trajectory.yaml")
 
