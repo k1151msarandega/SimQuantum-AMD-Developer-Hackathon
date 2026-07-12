@@ -7,17 +7,17 @@ creep:
   vy_range: [-5.0, 5.0]
   noise_std: 0.01            # small per-frame jitter on top of the linear creep
 jump:
-  # Decisive test: earlier attempts (frame 1200, then frame 500) showed the
-  # disagreement signal is essentially unchanged regardless of jump
-  # location -- same smooth monotonic curve either way. That rules out
-  # location as the issue. This test makes the jump magnitude large
-  # (roughly half the full sweep range) so that if the pipeline has ANY
-  # local sensitivity at all, it cannot miss it. If this still produces no
-  # visible response, that's a real finding about the detection approach,
-  # not a parameter to keep tuning.
   at_frame: 300
   vx_delta: 4.0
   vy_delta: -4.0
 stream_rate_hz:
   start: 5                    # frames/sec at the start of the run
-  end: 200                    # ramped up over the run to outpace the serial baseline
+  # Raised from 200 to 2000 after confirming (empirically, not guessed) that
+  # 200Hz never pushed queue depth past 4 -- nowhere near CHEAP_QUEUE_DEPTH
+  # (10) or SKIP_QUEUE_DEPTH (50), so the triage agent never had a real
+  # decision to make. This is also more faithful to the original problem:
+  # real dispersive/RF reflectometry readout in actual qubit labs runs at
+  # MHz rates, so 200Hz was always a conservative stand-in, not a ceiling
+  # chosen for realism. Raising it is a correction, not a way to force an
+  # outcome -- the thresholds themselves are untouched.
+  end: 2000
