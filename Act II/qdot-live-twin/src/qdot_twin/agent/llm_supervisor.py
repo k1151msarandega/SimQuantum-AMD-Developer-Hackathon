@@ -48,7 +48,16 @@ SUPERVISOR_INTERVAL_S = 1.0  # lowered from 3.0 -- the quick-iteration config
 # gives it a real shot without changing anything about the full-length
 # config's behavior, where this was never the bottleneck.
 HISTORY_MAXLEN = 300
-MODEL = "accounts/fireworks/models/gpt-oss-20b"
+MODEL = "accounts/fireworks/models/llama-v3p1-8b-instruct"
+# Switched from gpt-oss-20b: that's a reasoning model, and under a tight
+# token cap it can spend its whole budget on hidden chain-of-thought and
+# return empty content -- observed in testing as a raw AttributeError
+# before the empty-content guard below was added, and would otherwise
+# recur as a clean-but-still-failing ValueError even with the guard. A
+# plain instruct model has no hidden reasoning step to burn tokens on,
+# so it reliably returns the JSON directly -- the right tradeoff for a
+# background supervisor that should almost always produce something
+# usable, over one that's occasionally smarter but silently empty.
 
 # Hard safety bounds. The LLM can tune within these; it can never push a
 # value outside them, no matter what it returns.
@@ -161,14 +170,12 @@ class LLMSupervisor:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": _summarize(window)},
                 ],
-                max_tokens=600,
+                max_tokens=300,
                 temperature=0.2,
-                extra_body={"reasoning_effort": "low"},
             )
-            # gpt-oss-20b is a reasoning model (Harmony format): if it spends
-            # its whole token budget on internal chain-of-thought without ever
-            # emitting a final answer, .content comes back None rather than
-            # raising -- guard explicitly instead of letting .strip() crash.
+            # No reasoning_effort/Harmony handling needed -- plain instruct
+            # models return the answer directly in .content, no hidden
+            # chain-of-thought step that can silently consume the budget.
             content = resp.choices[0].message.content
             if not content:
                 raise ValueError("empty response content (model likely exhausted max_tokens on reasoning)")
