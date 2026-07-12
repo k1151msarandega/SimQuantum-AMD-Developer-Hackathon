@@ -11,6 +11,8 @@ dependencies = [
     "matplotlib",
     "openai",
     "qcodes",
+    "streamlit",
+    "plotly",
 ]
 
 [build-system]
