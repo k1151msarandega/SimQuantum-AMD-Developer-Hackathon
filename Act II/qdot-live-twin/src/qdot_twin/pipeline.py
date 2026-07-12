@@ -28,6 +28,13 @@ not deferring them to the next flush. Deferring would let the queue grow
 forever once it crossed the SKIP threshold, since nothing would ever
 shrink it -- a real deadlock risk. Dropping actually relieves backlog,
 matching the triage agent's own "shed load entirely" language.
+
+tier_counts (returned alongside the log from _run_batched when
+use_triage=True) tracks how many times each Tier was actually chosen --
+added after noticing batched and batched_triage produced near-identical
+numbers, which raised the question of whether the agent was ever choosing
+anything other than FULL under the current flush interval and queue
+thresholds. Better to check directly than assume.
 """
 import time
 from typing import Literal
@@ -58,7 +65,7 @@ def _run_serial(config_path: str) -> StalenessLog:
     return log
 
 
-def _run_batched(config_path: str, use_triage: bool) -> StalenessLog:
+def _run_batched(config_path: str, use_triage: bool):
     log = StalenessLog()
     buffer: list = []
     last_flush_time = time.time()
@@ -66,6 +73,8 @@ def _run_batched(config_path: str, use_triage: bool) -> StalenessLog:
 
     ood = RollingOODDetector()
     recent_drift_flags: list[bool] = []
+    tier_counts = {"FULL": 0, "CHEAP": 0, "SKIP": 0}
+    max_queue_depth_seen = 0
 
     for frame in stream(config_path):
         buffer.append(frame)
@@ -83,6 +92,8 @@ def _run_batched(config_path: str, use_triage: bool) -> StalenessLog:
         if not buffer:
             continue
 
+        max_queue_depth_seen = max(max_queue_depth_seen, len(buffer))
+
         if use_triage:
             queue_depth = len(buffer)
             time_since_full = now - last_full_update_time
@@ -90,6 +101,8 @@ def _run_batched(config_path: str, use_triage: bool) -> StalenessLog:
             tier = decide(queue_depth, time_since_full, recent_drift_activity)
         else:
             tier = Tier.FULL
+
+        tier_counts[tier.name] += 1
 
         if tier is Tier.FULL:
             estimate_batch(_stack(buffer), device="cuda")
@@ -113,15 +126,18 @@ def _run_batched(config_path: str, use_triage: bool) -> StalenessLog:
             log.record(frame_index=f.frame_index, t=completion_time,
                        lag=completion_time - f.emitted_at)
 
-    return log
+    return log, tier_counts, max_queue_depth_seen
 
 
-def run(mode: Literal["serial", "batched", "batched_triage"], config_path: str) -> StalenessLog:
+def run(mode: Literal["serial", "batched", "batched_triage"], config_path: str):
     if mode == "serial":
         return _run_serial(config_path)
     elif mode == "batched":
-        return _run_batched(config_path, use_triage=False)
+        log, tier_counts, max_q = _run_batched(config_path, use_triage=False)
+        return log
     elif mode == "batched_triage":
-        return _run_batched(config_path, use_triage=True)
+        log, tier_counts, max_q = _run_batched(config_path, use_triage=True)
+        print(f"  tier decisions: {tier_counts}  (max queue depth seen: {max_q})")
+        return log
     else:
         raise ValueError(f"unknown mode: {mode!r}")
