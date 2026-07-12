@@ -15,7 +15,9 @@ been run yet, the panel says so instead of showing a placeholder chart.
 """
 import os
 import time
+import uuid
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -174,9 +176,14 @@ if station_clicked:
         try:
             from qdot_twin.hardware.qcodes_adapter import QArrayTwinInstrument
             try:
-                inst = QArrayTwinInstrument("qdot_console_probe", config_path)
+                # Unique name per pull -- QCoDeS enforces process-wide unique
+                # instrument names, and this Streamlit server doesn't restart
+                # between clicks, so a fixed name breaks silently on the
+                # second pull. This was the likely cause of "nothing shows".
+                inst_name = f"qdot_console_probe_{uuid.uuid4().hex[:8]}"
+                inst = QArrayTwinInstrument(inst_name, config_path)
                 inst.next_frame()
-                frame_data = inst.frame()
+                frame_data = np.asarray(inst.frame(), dtype=float)
                 st.session_state.station_reading = {
                     "frame_index": inst.frame_index(),
                     "vx": inst.vx(),
@@ -365,31 +372,44 @@ with tab_station:
         c4.metric("patch shape", str(reading["shape"]))
 
         frame = reading.get("frame")
-        if frame is not None:
-            st.markdown("")
-            heat = go.Figure(
-                data=go.Heatmap(
-                    z=frame,
-                    colorscale="Viridis",
-                    zmin=float(frame.min()),
-                    zmax=float(frame.max()),
-                    colorbar=dict(title="charge state (a.u.)"),
-                )
-            )
-            heat.update_layout(
-                title=f"Live twin state \u2014 stability-diagram patch at Vx={reading['vx']:.4f} V, Vy={reading['vy']:.4f} V",
-                template="plotly_white",
-                height=480,
-                margin=dict(l=40, r=20, t=50, b=40),
-                xaxis_title="gate sweep index (x)",
-                yaxis_title="gate sweep index (y)",
-            )
-            st.plotly_chart(heat, use_container_width=True)
-            st.caption(
-                "This is the actual charge-stability-diagram patch the ensemble CNN estimator sees for "
-                "this frame \u2014 the thing being estimated, not just a number about how fast it was "
-                "estimated. Color scale is fit to this frame's own min/max so transitions stay visible "
-                "wherever in the voltage window you land."
-            )
-        else:
+        if frame is None:
             st.caption("No frame array captured for this pull \u2014 shape only.")
+        else:
+            st.markdown("")
+            try:
+                frame = np.nan_to_num(np.asarray(frame, dtype=float))
+                zmin, zmax = float(frame.min()), float(frame.max())
+                if zmin == zmax:
+                    # A perfectly uniform patch (deep in one charge state, no
+                    # boundary in view) renders as an invisible flat color
+                    # under default Plotly color mapping -- this was likely
+                    # why the heatmap looked like it "didn't show". Widen the
+                    # range so it's visibly a solid color, and say so.
+                    zmin, zmax = zmin - 0.5, zmax + 0.5
+                    st.caption(
+                        "This patch is uniform (no charge-state boundary in this window) "
+                        "-- rendered as a flat color rather than a blank plot."
+                    )
+                heat = go.Figure(
+                    data=go.Heatmap(
+                        z=frame, colorscale="Viridis", zmin=zmin, zmax=zmax,
+                        colorbar=dict(title="charge state (a.u.)"),
+                    )
+                )
+                heat.update_layout(
+                    title=f"Live twin state \u2014 stability-diagram patch at Vx={reading['vx']:.4f} V, Vy={reading['vy']:.4f} V",
+                    template="plotly_white",
+                    height=480,
+                    margin=dict(l=40, r=20, t=50, b=40),
+                    xaxis_title="gate sweep index (x)",
+                    yaxis_title="gate sweep index (y)",
+                )
+                st.plotly_chart(heat, use_container_width=True)
+                st.caption(
+                    "This is the actual charge-stability-diagram patch the ensemble CNN estimator sees for "
+                    "this frame \u2014 the thing being estimated, not just a number about how fast it was "
+                    "estimated."
+                )
+            except Exception as e:
+                st.error(f"Heatmap render failed: {e!r}")
+                st.caption(f"Raw frame stats: shape={frame.shape}, min={frame.min():.4f}, max={frame.max():.4f}")
