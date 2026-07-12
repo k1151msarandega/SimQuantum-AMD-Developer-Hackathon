@@ -188,3 +188,26 @@ def run(mode: Literal["serial", "batched", "batched_triage", "batched_triage_llm
         return log
     else:
         raise ValueError(f"unknown mode: {mode!r}")
+
+
+def run_detailed(mode: Literal["serial", "batched", "batched_triage", "batched_triage_llm"], config_path: str):
+    """Like run(), but also returns tier_counts / max_queue_depth / LLM-supervisor
+    events where applicable. run() stays the simple single-log interface that
+    run_full_demo.py and other existing scripts already depend on; this exists
+    for app.py's dashboard, which needs the extra detail to display.
+
+    Returns (log, tier_counts_or_None, max_queue_depth_or_None, events_or_None).
+    """
+    if mode == "serial":
+        return _run_serial(config_path), None, None, None
+    elif mode == "batched":
+        log, tier_counts, max_q, events = _run_batched(config_path, use_triage=False)
+        return log, None, max_q, None
+    elif mode == "batched_triage":
+        log, tier_counts, max_q, events = _run_batched(config_path, use_triage=True)
+        return log, tier_counts, max_q, events
+    elif mode == "batched_triage_llm":
+        log, tier_counts, max_q, events = _run_batched(config_path, use_triage=True, llm_supervised=True)
+        return log, tier_counts, max_q, events
+    else:
+        raise ValueError(f"unknown mode: {mode!r}")
