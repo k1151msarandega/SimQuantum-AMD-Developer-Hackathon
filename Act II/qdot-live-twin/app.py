@@ -25,8 +25,6 @@ from qdot_twin import pipeline
 
 # ---------------------------------------------------------------------------
 # Page shell / styling -- monospace readouts, muted palette, status chips.
-# Deliberately not a "fun demo" palette: this is meant to look like
-# something you'd trust next to a real fridge run.
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="qdot-live-twin \u2014 Control Console",
@@ -146,8 +144,8 @@ with st.sidebar:
 
     st.markdown('<div class="section-label" style="margin-top:1.5rem;">Instrument station</div>', unsafe_allow_html=True)
     st.caption(
-        "Standalone QCoDeS Instrument wrapper (hardware/qcodes_adapter.py) around the same stream, "
-        "not wired into the timed pipeline runs above."
+        "The twin's data source wrapped as a real QCoDeS Instrument \u2014 read as QCoDeS Parameters, "
+        "independent of the timed runs above."
     )
     station_clicked = st.button("Pull one frame via QCoDeS", use_container_width=True)
 
@@ -178,11 +176,13 @@ if station_clicked:
             try:
                 inst = QArrayTwinInstrument("qdot_console_probe", config_path)
                 inst.next_frame()
+                frame_data = inst.frame()
                 st.session_state.station_reading = {
                     "frame_index": inst.frame_index(),
                     "vx": inst.vx(),
                     "vy": inst.vy(),
-                    "shape": inst.frame().shape,
+                    "shape": frame_data.shape,
+                    "frame": frame_data,
                     "error": None,
                 }
                 inst.close()
@@ -209,6 +209,16 @@ with tab_overview:
             st.error(f"{MODE_LABELS[mode]} failed: {r['error']}")
 
         if results:
+            configs_used = {r["config"] for r in results.values()}
+            if len(configs_used) > 1:
+                st.warning(
+                    "Results below mix different trajectory configs (quick/300-frame and full/2000-frame runs). "
+                    "Worst-case lag and wall time are **not directly comparable** across a config mismatch. "
+                    "Click **Clear results**, pick one config in the sidebar, and re-run all modes together "
+                    "for an apples-to-apples comparison.",
+                    icon="\u26A0\uFE0F",
+                )
+
             # --- KPI row -------------------------------------------------
             ordered_kpi = [m for m in MODE_ORDER if m in results]
             kpi_cols = st.columns(len(ordered_kpi))
@@ -217,6 +227,7 @@ with tab_overview:
                 df = r["log"].to_dataframe()
                 with col:
                     st.markdown(f'<div class="section-label">{MODE_LABELS[mode]}</div>', unsafe_allow_html=True)
+                    st.caption(f"config: {r['config'].split('/')[-1]}")
                     st.metric("Worst-case lag", f"{df['wall_clock_lag'].max():.3f} s")
                     st.metric("Mean lag", f"{df['wall_clock_lag'].mean():.3f} s")
                     sub1, sub2 = st.columns(2)
@@ -231,7 +242,7 @@ with tab_overview:
 
             st.markdown("")
 
-            # --- Staleness comparison, shared y-axis, one row per mode ---
+            # --- Staleness comparison, shared log y-axis, one row per mode
             ordered = ordered_kpi
             fig = make_subplots(
                 rows=len(ordered), cols=1, shared_xaxes=True,
@@ -248,14 +259,31 @@ with tab_overview:
                     ),
                     row=i, col=1,
                 )
-            fig.update_yaxes(matches="y", title_text="lag (s)")
+            fig.update_yaxes(matches="y", type="log", title_text="lag (s), log scale")
             fig.update_xaxes(title_text="frame index", row=len(ordered), col=1)
             fig.update_layout(
                 height=220 * len(ordered), margin=dict(l=60, r=20, t=40, b=40),
                 template="plotly_white",
-                title="Staleness comparison \u2014 wall-clock lag per frame (same y-scale across modes, deliberately)",
+                title="Staleness comparison \u2014 wall-clock lag per frame (same log-scaled y-axis across modes, deliberately)",
             )
             st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("What am I looking at? (read before judging)", expanded=True):
+                st.markdown(
+                    "- **Serial (CPU baseline):** one frame processed at a time, immediately, no batching. "
+                    "Bounded lag, but throughput-limited \u2014 the naive floor.\n"
+                    "- **GPU batched (no triage):** every flush interval, whatever's buffered gets a real GPU "
+                    "batch inference pass. Real per-frame speedup, but nothing sheds load \u2014 as the stream "
+                    "accelerates toward 2000Hz, backlog can build unboundedly, spiking worst-case lag.\n"
+                    "- **GPU batched + triage:** a rule-based agent watches queue depth, staleness, and drift, "
+                    "and switches to CHEAP or SKIP tiers under load instead of always running FULL \u2014 this is "
+                    "what caps worst-case lag even though raw GPU batching above can spike.\n"
+                    "- **GPU batched + triage + LLM supervisor:** same triage agent, but a background LLM "
+                    "reads recent backlog trends and tunes the FULL/CHEAP/SKIP thresholds instead of static "
+                    "defaults \u2014 see the *LLM supervisor* tab for exactly what it changed and why.\n\n"
+                    "Y-axis is **log-scaled and shared** across all four panels on purpose, so a real order-of-"
+                    "magnitude difference is visible, without letting any one panel auto-scale to flatter itself."
+                )
 
             # --- Tier routing bar chart, for modes that have it ----------
             triage_modes = [m for m in ordered if results[m]["tier_counts"]]
@@ -292,24 +320,37 @@ with tab_supervisor:
                 "Try the full-length config."
             )
         else:
-            st.caption(f"{len(events)} threshold updates made by the background supervisor during this run.")
-            rows = []
+            st.caption(
+                f"{len(events)} threshold updates the background LLM supervisor actually made and "
+                "consumed during this run \u2014 shown as a running log of its decisions."
+            )
             t0 = events[0].t
             for ev in events:
-                rows.append({
-                    "t (s)": round(ev.t - t0, 2),
-                    "cheap_queue_depth": f"{ev.old[0]} \u2192 {ev.new[0]}",
-                    "skip_queue_depth": f"{ev.old[1]} \u2192 {ev.new[1]}",
-                    "stale_threshold_s": f"{ev.old[2]:.3f} \u2192 {ev.new[2]:.3f}",
-                    "reasoning": ev.reasoning,
-                })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                with st.chat_message("assistant", avatar="\U0001F9E0"):
+                    st.markdown(
+                        f"**t = {ev.t - t0:.2f}s** \u2014 {ev.reasoning}\n\n"
+                        f"`cheap_queue_depth: {ev.old[0]} \u2192 {ev.new[0]}` \u00b7 "
+                        f"`skip_queue_depth: {ev.old[1]} \u2192 {ev.new[1]}` \u00b7 "
+                        f"`stale_threshold_s: {ev.old[2]:.3f} \u2192 {ev.new[2]:.3f}`"
+                    )
+            with st.expander("Raw table (t, thresholds, reasoning)"):
+                rows = []
+                for ev in events:
+                    rows.append({
+                        "t (s)": round(ev.t - t0, 2),
+                        "cheap_queue_depth": f"{ev.old[0]} \u2192 {ev.new[0]}",
+                        "skip_queue_depth": f"{ev.old[1]} \u2192 {ev.new[1]}",
+                        "stale_threshold_s": f"{ev.old[2]:.3f} \u2192 {ev.new[2]:.3f}",
+                        "reasoning": ev.reasoning,
+                    })
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 with tab_station:
     st.caption(
-        "This does not touch the timed pipeline runs above \u2014 it is a standalone read against a "
-        "QCoDeS Instrument wrapper (hardware/qcodes_adapter.py) around the same QArray-backed stream, "
-        "demonstrating that the twin's data source can be consumed by a real QCoDeS lab stack."
+        "The twin's data source wrapped as a real QCoDeS Instrument (hardware/qcodes_adapter.py) \u2014 "
+        "frame_index / Vx / Vy / frame all read as QCoDeS Parameters, so a QCoDeS-based lab stack could "
+        "subscribe to this exact stream today. This pulls one frame directly, independent of the timed "
+        "benchmark runs above \u2014 the correct scope for a framework-compatibility demo, not a shortcut."
     )
     reading = st.session_state.get("station_reading")
     if not reading:
@@ -322,3 +363,33 @@ with tab_station:
         c2.metric("Vx", f"{reading['vx']:.4f} V")
         c3.metric("Vy", f"{reading['vy']:.4f} V")
         c4.metric("patch shape", str(reading["shape"]))
+
+        frame = reading.get("frame")
+        if frame is not None:
+            st.markdown("")
+            heat = go.Figure(
+                data=go.Heatmap(
+                    z=frame,
+                    colorscale="Viridis",
+                    zmin=float(frame.min()),
+                    zmax=float(frame.max()),
+                    colorbar=dict(title="charge state (a.u.)"),
+                )
+            )
+            heat.update_layout(
+                title=f"Live twin state \u2014 stability-diagram patch at Vx={reading['vx']:.4f} V, Vy={reading['vy']:.4f} V",
+                template="plotly_white",
+                height=480,
+                margin=dict(l=40, r=20, t=50, b=40),
+                xaxis_title="gate sweep index (x)",
+                yaxis_title="gate sweep index (y)",
+            )
+            st.plotly_chart(heat, use_container_width=True)
+            st.caption(
+                "This is the actual charge-stability-diagram patch the ensemble CNN estimator sees for "
+                "this frame \u2014 the thing being estimated, not just a number about how fast it was "
+                "estimated. Color scale is fit to this frame's own min/max so transitions stay visible "
+                "wherever in the voltage window you land."
+            )
+        else:
+            st.caption("No frame array captured for this pull \u2014 shape only.")
