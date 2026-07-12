@@ -44,7 +44,7 @@ from qdot_twin.agent.thresholds import TriageThresholds
 
 SUPERVISOR_INTERVAL_S = 3.0
 HISTORY_MAXLEN = 300
-MODEL = "accounts/fireworks/models/llama-v3p1-8b-instruct"
+MODEL = "accounts/fireworks/models/gpt-oss-20b"
 
 # Hard safety bounds. The LLM can tune within these; it can never push a
 # value outside them, no matter what it returns.
