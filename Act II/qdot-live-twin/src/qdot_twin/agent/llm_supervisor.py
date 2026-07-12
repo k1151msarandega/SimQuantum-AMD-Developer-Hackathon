@@ -42,7 +42,11 @@ from dataclasses import dataclass
 
 from qdot_twin.agent.thresholds import TriageThresholds
 
-SUPERVISOR_INTERVAL_S = 3.0
+SUPERVISOR_INTERVAL_S = 1.0  # lowered from 3.0 -- the quick-iteration config
+# (configs/trajectory_quick.yaml, 300 frames) likely finishes in a few
+# seconds total, so a 3s cadence had almost no chance to ever tick. 1s
+# gives it a real shot without changing anything about the full-length
+# config's behavior, where this was never the bottleneck.
 HISTORY_MAXLEN = 300
 MODEL = "accounts/fireworks/models/gpt-oss-20b"
 
@@ -145,7 +149,7 @@ class LLMSupervisor:
 
     def _tick(self) -> None:
         window = self.history.snapshot()
-        if len(window) < 5:
+        if len(window) < 3:  # lowered from 5, same reasoning as SUPERVISOR_INTERVAL_S above
             return  # not enough signal yet to make a meaningful call
 
         old = self.thresholds.snapshot()
