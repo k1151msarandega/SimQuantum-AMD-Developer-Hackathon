@@ -1,10 +1,127 @@
 """Wires stream -> twin -> staleness -> drift -> triage into three runnable modes.
 
-Modes: "serial", "batched", "batched_triage" -- run each over the same
-trajectory config to produce the three-regime staleness comparison chart.
+Modes:
+  "serial"          -- FULL tier only, one frame at a time, CPU (step 2's baseline)
+  "batched"         -- FULL tier only, micro-batched on GPU, no triage
+  "batched_triage"  -- micro-batched on GPU, triage agent picks FULL/CHEAP/SKIP
+                        per micro-batch using real queue depth, real staleness,
+                        and a real drift signal (perception/ood.py)
+
+MICRO-BATCHING DESIGN NOTE (read before changing this file):
+stream() is a blocking, real-time-paced generator running in this same
+thread -- there is no separate producer thread accumulating frames while
+we process. This is a SYNCHRONOUS APPROXIMATION of a producer/consumer
+system, not a true concurrent one, and that's worth being upfront about
+rather than letting it pass as something it isn't. The approximation:
+frames are read one at a time as they arrive; after each arrival, if
+FLUSH_INTERVAL_S of wall-clock time has elapsed since the last flush,
+whatever is currently buffered gets flushed together. This is a real,
+legitimate micro-batching policy (a max-latency flush trigger, used in
+real systems) and produces the right qualitative dynamic: batch size grows
+naturally under load (many frames arrive within one flush window) and
+shrinks to ~1 when the stream is slow (each frame already exceeds the
+flush interval on its own) -- exactly the condition GPU batching was shown
+in step 3 to handle well, without being forced.
+
+SKIP semantics: dropping the buffered frames entirely (no compute spent),
+not deferring them to the next flush. Deferring would let the queue grow
+forever once it crossed the SKIP threshold, since nothing would ever
+shrink it -- a real deadlock risk. Dropping actually relieves backlog,
+matching the triage agent's own "shed load entirely" language.
 """
+import time
 from typing import Literal
 
+import numpy as np
 
-def run(mode: Literal["serial", "batched", "batched_triage"], config_path: str):
-    raise NotImplementedError
+from qdot_twin.agent.triage import Tier, decide
+from qdot_twin.perception.ood import RollingOODDetector
+from qdot_twin.stream.generator import stream
+from qdot_twin.twin.batch_estimator import estimate_batch
+from qdot_twin.twin.serial_estimator import CHEAP_N_MEMBERS, estimate
+from qdot_twin.twin.staleness import StalenessLog
+
+FLUSH_INTERVAL_S = 0.02       # micro-batch window for "batched"/"batched_triage"
+RECENT_DRIFT_WINDOW = 20      # frames considered "recent" for the drift signal
+
+
+def _stack(frames) -> np.ndarray:
+    return np.stack([f.data for f in frames]).astype(np.float32)
+
+
+def _run_serial(config_path: str) -> StalenessLog:
+    log = StalenessLog()
+    for frame in stream(config_path):
+        estimate(frame.data)  # FULL tier, one frame at a time, CPU
+        now = time.time()
+        log.record(frame_index=frame.frame_index, t=now, lag=now - frame.emitted_at)
+    return log
+
+
+def _run_batched(config_path: str, use_triage: bool) -> StalenessLog:
+    log = StalenessLog()
+    buffer: list = []
+    last_flush_time = time.time()
+    last_full_update_time = time.time()
+
+    ood = RollingOODDetector()
+    recent_drift_flags: list[bool] = []
+
+    for frame in stream(config_path):
+        buffer.append(frame)
+
+        anomalous = ood.update_and_check(frame.data)
+        recent_drift_flags.append(anomalous)
+        if len(recent_drift_flags) > RECENT_DRIFT_WINDOW:
+            recent_drift_flags.pop(0)
+
+        now = time.time()
+        if now - last_flush_time < FLUSH_INTERVAL_S:
+            continue  # not time to flush yet -- keep accumulating
+
+        last_flush_time = now
+        if not buffer:
+            continue
+
+        if use_triage:
+            queue_depth = len(buffer)
+            time_since_full = now - last_full_update_time
+            recent_drift_activity = any(recent_drift_flags)
+            tier = decide(queue_depth, time_since_full, recent_drift_activity)
+        else:
+            tier = Tier.FULL
+
+        if tier is Tier.FULL:
+            estimate_batch(_stack(buffer), device="cuda")
+            last_full_update_time = time.time()
+        elif tier is Tier.CHEAP:
+            estimate_batch(_stack(buffer), device="cuda", n_members=CHEAP_N_MEMBERS)
+        # Tier.SKIP: no compute spent -- see module docstring on why this
+        # drops the buffer rather than deferring it.
+
+        completion_time = time.time()
+        for f in buffer:
+            log.record(frame_index=f.frame_index, t=completion_time,
+                       lag=completion_time - f.emitted_at)
+        buffer = []
+
+    # Flush whatever's left when the stream ends.
+    if buffer:
+        estimate_batch(_stack(buffer), device="cuda")
+        completion_time = time.time()
+        for f in buffer:
+            log.record(frame_index=f.frame_index, t=completion_time,
+                       lag=completion_time - f.emitted_at)
+
+    return log
+
+
+def run(mode: Literal["serial", "batched", "batched_triage"], config_path: str) -> StalenessLog:
+    if mode == "serial":
+        return _run_serial(config_path)
+    elif mode == "batched":
+        return _run_batched(config_path, use_triage=False)
+    elif mode == "batched_triage":
+        return _run_batched(config_path, use_triage=True)
+    else:
+        raise ValueError(f"unknown mode: {mode!r}")
