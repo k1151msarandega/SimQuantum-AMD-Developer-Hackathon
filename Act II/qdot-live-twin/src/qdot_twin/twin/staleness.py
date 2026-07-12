@@ -21,11 +21,19 @@ class StalenessLog:
     frame_indices: list = field(default_factory=list)
     timestamps: list = field(default_factory=list)
     wall_clock_lag: list = field(default_factory=list)
+    # Which tier actually produced this record -- "FULL", "CHEAP", "SKIP",
+    # or None for callers (e.g. the serial baseline) that don't have tiers.
+    # Added because pipeline.py used to call record() unconditionally
+    # regardless of tier, so a SKIP'd (never-computed) frame was
+    # indistinguishable in the log from a real FULL/CHEAP completion --
+    # the log had no way to say "this one wasn't actually estimated."
+    tiers: list = field(default_factory=list)
 
-    def record(self, frame_index: int, t: float, lag: float) -> None:
+    def record(self, frame_index: int, t: float, lag: float, tier: str | None = None) -> None:
         self.frame_indices.append(frame_index)
         self.timestamps.append(t)
         self.wall_clock_lag.append(lag)
+        self.tiers.append(tier)
 
     def to_dataframe(self):
         import pandas as pd
@@ -34,4 +42,5 @@ class StalenessLog:
             "frame_index": self.frame_indices,
             "timestamp": self.timestamps,
             "wall_clock_lag": self.wall_clock_lag,
+            "tier": self.tiers,
         })
