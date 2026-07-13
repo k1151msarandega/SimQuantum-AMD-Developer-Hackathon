@@ -48,7 +48,7 @@ SUPERVISOR_INTERVAL_S = 1.0  # lowered from 3.0 -- the quick-iteration config
 # gives it a real shot without changing anything about the full-length
 # config's behavior, where this was never the bottleneck.
 HISTORY_MAXLEN = 300
-MODEL = "accounts/fireworks/models/llama-v3p1-8b-instruct"
+MODEL = "accounts/fireworks/models/gemma-4-26b-a4b-it"
 # Switched from gpt-oss-20b: that's a reasoning model, and under a tight
 # token cap it can spend its whole budget on hidden chain-of-thought and
 # return empty content -- observed in testing as a raw AttributeError
