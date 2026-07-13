@@ -310,15 +310,15 @@ with tab_overview:
                     "what caps worst-case lag even though raw GPU batching above can spike.\n"
                     "- **GPU batched + triage + LLM supervisor:** same triage agent, but a background LLM "
                     "reads recent backlog trends and tunes the FULL/CHEAP/SKIP thresholds instead of static "
-                    "defaults \u2014 see the *LLM supervisor* tab for exactly what it changed and why.\n\n"
-                    "Y-axis is **log-scaled and shared** across all four panels on purpose, so a real order-of-"
-                    "magnitude difference is visible, without letting any one panel auto-scale to flatter itself."
+                    "defaults \u2014 see the *LLM supervisor* tab for exactly what it changed and why.\n"
                     "- **Red X markers** mark frames the triage agent dropped entirely (SKIP tier) \u2014 "
                     "never estimated, shown separately from the line so they're not mistaken for real "
                     "completions. Note: on this patch size / ensemble size, CHEAP and SKIP's actual GPU "
                     "compute savings are small in absolute terms (see the compute-time caption on each "
                     "card above) \u2014 the story here is *shed load under backlog*, not *big per-frame "
                     "speedup*.\n\n"
+                    "Y-axis is **log-scaled and shared** across all four panels on purpose, so a real order-of-"
+                    "magnitude difference is visible, without letting any one panel auto-scale to flatter itself."
                 )
 
             # --- Tier routing bar chart, for modes that have it ----------
