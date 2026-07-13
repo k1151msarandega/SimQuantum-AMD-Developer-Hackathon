@@ -13,7 +13,7 @@ import threading
 # with thresholds=None (untouched by this file) and a decide() call with
 # a freshly-constructed TriageThresholds() behave identically.
 DEFAULT_CHEAP_QUEUE_DEPTH = 10
-DEFAULT_SKIP_QUEUE_DEPTH = 50
+DEFAULT_SKIP_QUEUE_DEPTH = 12
 DEFAULT_STALE_THRESHOLD_S = 0.05
 
 
