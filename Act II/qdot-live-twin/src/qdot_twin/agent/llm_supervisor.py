@@ -48,7 +48,7 @@ SUPERVISOR_INTERVAL_S = 1.0  # lowered from 3.0 -- the quick-iteration config
 # gives it a real shot without changing anything about the full-length
 # config's behavior, where this was never the bottleneck.
 HISTORY_MAXLEN = 300
-MODEL = "accounts/fireworks/models/gemma-4-26b-a4b-it"
+MODEL = "accounts/fireworks/models/llama-v3p1-8b-instruct"
 # Switched from gpt-oss-20b: that's a reasoning model, and under a tight
 # token cap it can spend its whole budget on hidden chain-of-thought and
 # return empty content -- observed in testing as a raw AttributeError
@@ -58,6 +58,18 @@ MODEL = "accounts/fireworks/models/gemma-4-26b-a4b-it"
 # so it reliably returns the JSON directly -- the right tradeoff for a
 # background supervisor that should almost always produce something
 # usable, over one that's occasionally smarter but silently empty.
+#
+# NOTE (fixed after the captured demo run): gemma-4-26b-a4b-it is listed
+# on Fireworks but is NOT enabled for serverless inference -- it's
+# on-demand/dedicated-deployment only (see fireworks.ai/models/fireworks/
+# gemma-4-26b-a4b-it, "Serverless: Not supported"). Calling it through a
+# plain API-key chat.completions request 404s every time with
+# NotFoundError("Model not found, inaccessible, and/or not deployed").
+# That's exactly what happened during the recorded run: all 9 supervisor
+# ticks failed and thresholds silently stayed at their defaults for the
+# whole 2000-frame trajectory. llama-v3p1-8b-instruct is on Fireworks'
+# serverless tier -- verify against fireworks.ai/models before the next
+# run, since the catalog does change.
 
 # Hard safety bounds. The LLM can tune within these; it can never push a
 # value outside them, no matter what it returns.
