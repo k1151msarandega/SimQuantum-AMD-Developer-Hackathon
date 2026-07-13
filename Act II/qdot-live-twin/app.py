@@ -507,14 +507,25 @@ with tab_supervisor:
 
 with tab_station:
     st.caption(
-        "The twin's data source wrapped as a real QCoDeS Instrument (hardware/qcodes_adapter.py) \u2014 "
-        "frame_index / Vx / Vy / frame all read as QCoDeS Parameters, so a QCoDeS-based lab stack could "
-        "subscribe to this exact stream today. This pulls one frame directly, independent of the timed "
-        "benchmark runs above \u2014 the correct scope for a framework-compatibility demo, not a shortcut."
+        "The twin's data source wrapped as a real, controllable QCoDeS Instrument "
+        "(hardware/qcodes_adapter.py) — frame_index / Vx / Vy / frame read as QCoDeS Parameters, and "
+        "vx_override / vy_override are real *settable* Parameters that inject a live voltage into the "
+        "stream the very next frame. Not a one-shot read: apply an override in the sidebar, pull a few "
+        "frames, and watch Vx/Vy and the drift flag react."
     )
+    override_vx_cur, override_vy_cur = station_inst.vx_override(), station_inst.vy_override()
+    if override_vx_cur is not None or override_vy_cur is not None:
+        st.caption(
+            f"**Active override:** vx={override_vx_cur if override_vx_cur is not None else 'script'} · "
+            f"vy={override_vy_cur if override_vy_cur is not None else 'script'} — subsequent pulls use this, "
+            "not the scripted trajectory, until cleared."
+        )
+    else:
+        st.caption("No override active — following the scripted trajectory.")
+
     reading = st.session_state.get("station_reading")
     if not reading:
-        st.info("Click **Pull one frame via QCoDeS** in the sidebar.")
+        st.info("Click **Pull next frame** in the sidebar.")
     elif reading.get("error"):
         st.error(f"QCoDeS pull failed: {reading['error']}")
     else:
@@ -523,6 +534,19 @@ with tab_station:
         c2.metric("Vx", f"{reading['vx']:.4f} V")
         c3.metric("Vy", f"{reading['vy']:.4f} V")
         c4.metric("patch shape", str(reading["shape"]))
+        if reading.get("anomalous"):
+            st.warning("Drift detector: **ANOMALOUS** — this frame tripped the OOD threshold.", icon="⚠️")
+        else:
+            st.caption("Drift detector: nominal (no OOD flag on this frame).")
+
+        history = st.session_state.get("station_history", [])
+        if len(history) > 1:
+            hist_df = pd.DataFrame([
+                {"pull #": i + 1, "vx": h["vx"], "vy": h["vy"], "anomalous": h["anomalous"]}
+                for i, h in enumerate(history)
+            ])
+            with st.expander(f"Pull history ({len(history)} pulls this session)"):
+                st.dataframe(hist_df, use_container_width=True, hide_index=True)
 
         frame = reading.get("frame")
         if frame is None:
