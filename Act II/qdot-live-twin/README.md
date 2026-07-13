@@ -27,12 +27,22 @@ pip install -e .
 ```
 
 ## Run
-```
-python scripts/run_demo.py --mode batched_triage --config configs/trajectory.yaml
-```
 
-Modes: `serial`, `batched`, `batched_triage` — each produces a staleness
-log; run all three to reproduce the comparison chart.
+This runs on an AMD GPU droplet (AMD Developer Cloud), not locally:
+
+1. Spin up / resume your team's AMD GPU pod, open its Jupyter environment.
+2. In a notebook terminal: `pip install -e .` (ROCm-enabled torch is
+   already present on the droplet image).
+3. Set `FIREWORKS_API_KEY` as an environment variable (needed for the
+   "GPU batched + triage + LLM supervisor" mode).
+4. Launch the console: `[YOUR ACTUAL STREAMLIT LAUNCH COMMAND]`
+5. Open the Streamlit link Jupyter/the droplet exposes — that's the
+   control console shown in the demo video/screenshots.
+
+Note: the app is tied to the droplet's GPU session — killing the droplet
+kills the Streamlit link. `scripts/run_full_demo.py` is a secondary,
+GPU-required CLI path that reproduces the three-mode staleness comparison
+chart headlessly, for anyone who wants numbers without the UI.
 
 ## Status
 Scaffolded, implementation in progress. See `docs/pitch_notes.md` for
