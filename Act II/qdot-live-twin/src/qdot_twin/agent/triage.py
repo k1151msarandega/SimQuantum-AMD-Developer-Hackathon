@@ -48,7 +48,11 @@ class Tier(Enum):
 
 # Placeholders pending real queue dynamics from pipeline.py (step 6).
 CHEAP_QUEUE_DEPTH = 10
-SKIP_QUEUE_DEPTH = 50
+# Corrected from an untested placeholder (50) to the system's real measured
+# ceiling: full-config runs top out at max queue depth ~13-15 (generator
+# throughput-bound, not flush-interval-bound -- see pipeline.py notes).
+# 50 was unreachable and SKIP never fired in any run at any config.
+SKIP_QUEUE_DEPTH = 12
 
 # Grounded in step 2's measured worst-case lag (~0.0625s) -- see docstring.
 STALE_THRESHOLD_S = 0.05
