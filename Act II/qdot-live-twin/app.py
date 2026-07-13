@@ -289,7 +289,11 @@ with tab_overview:
                         ),
                         row=i, col=1,
                     )
-            fig.update_yaxes(matches="y", type="log", title_text="lag (s), log scale")
+            fig.update_yaxes(
+                matches="y", type="log", title_text="lag (s), log scale",
+                tickvals=[0.001, 0.01, 0.1, 1],
+                ticktext=["0.001", "0.01", "0.1", "1"],
+            )
             fig.update_xaxes(title_text="frame index", row=len(ordered), col=1)
             fig.update_layout(
                 height=220 * len(ordered), margin=dict(l=60, r=20, t=40, b=40),
