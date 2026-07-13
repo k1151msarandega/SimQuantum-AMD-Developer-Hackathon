@@ -144,12 +144,29 @@ with st.sidebar:
         st.session_state.results = {}
         st.rerun()
 
-    st.markdown('<div class="section-label" style="margin-top:1.5rem;">Instrument station</div>', unsafe_allow_html=True)
-    st.caption(
-        "The twin's data source wrapped as a real QCoDeS Instrument \u2014 read as QCoDeS Parameters, "
-        "independent of the timed runs above."
+    st.markdown('<div class="section-label" style="margin-top:1.5rem;">Live run</div>', unsafe_allow_html=True)
+    st.caption("Streams mid-run state instead of blocking until the run finishes \u2014 see the Live run tab.")
+    live_mode = st.selectbox(
+        "Mode to run live", options=MODE_ORDER, format_func=lambda m: MODE_LABELS[m],
+        index=2, key="live_mode_select",
     )
-    station_clicked = st.button("Pull one frame via QCoDeS", use_container_width=True)
+    if live_mode == "batched_triage_llm" and not fireworks_ready:
+        st.warning("FIREWORKS_API_KEY is not set \u2014 this live run will fail fast.", icon="\u26A0\uFE0F")
+    live_run_clicked = st.button("\u25B6  Run live", use_container_width=True, key="live_run_btn")
+
+    st.markdown('<div class="section-label" style="margin-top:1.5rem;">Instrument station \u2014 live control</div>', unsafe_allow_html=True)
+    st.caption(
+        "The twin's data source as a real, *controllable* QCoDeS Instrument \u2014 override Vx/Vy live and "
+        "watch the twin + drift detector react, one pull at a time."
+    )
+    ov_vx_on = st.checkbox("Override Vx", key="ov_vx_on")
+    ov_vx_val = st.number_input("Vx (V)", value=0.0, step=0.05, key="ov_vx_val", disabled=not ov_vx_on)
+    ov_vy_on = st.checkbox("Override Vy", key="ov_vy_on")
+    ov_vy_val = st.number_input("Vy (V)", value=0.0, step=0.05, key="ov_vy_val", disabled=not ov_vy_on)
+    apply_override_clicked = st.button("Apply override", use_container_width=True, key="apply_override_btn")
+    clear_override_clicked = st.button("Clear override", use_container_width=True, key="clear_override_btn")
+    station_clicked = st.button("\u25B6  Pull next frame", use_container_width=True, type="primary", key="pull_frame_btn")
+    reset_station_clicked = st.button("Reset instrument", use_container_width=True, key="reset_station_btn")
 
 # ---------------------------------------------------------------------------
 # Execute selected modes
@@ -172,38 +189,63 @@ if run_clicked:
             except Exception as e:
                 st.session_state.results[mode] = {"error": repr(e)}
 
-if station_clicked:
-    with st.spinner("Pulling one frame from QArrayTwinInstrument \u2026"):
+# --- Instrument station: persistent, controllable QCoDeS instrument -----
+# Kept alive across reruns in session_state (rather than recreated per
+# pull, as before) specifically so an applied override actually persists
+# across consecutive "Pull next frame" clicks -- a fresh instrument every
+# click would silently drop the override each time.
+from qdot_twin.hardware.qcodes_adapter import QArrayTwinInstrument
+from qdot_twin.perception.ood import RollingOODDetector as _StationOOD
+
+if reset_station_clicked or "qcodes_instrument" not in st.session_state:
+    old_inst = st.session_state.get("qcodes_instrument")
+    if old_inst is not None:
         try:
-            from qdot_twin.hardware.qcodes_adapter import QArrayTwinInstrument
-            try:
-                # Unique name per pull -- QCoDeS enforces process-wide unique
-                # instrument names, and this Streamlit server doesn't restart
-                # between clicks, so a fixed name breaks silently on the
-                # second pull. This was the likely cause of "nothing shows".
-                inst_name = f"qdot_console_probe_{uuid.uuid4().hex[:8]}"
-                inst = QArrayTwinInstrument(inst_name, config_path)
-                inst.next_frame()
-                frame_data = np.asarray(inst.frame(), dtype=float)
-                st.session_state.station_reading = {
-                    "frame_index": inst.frame_index(),
-                    "vx": inst.vx(),
-                    "vy": inst.vy(),
-                    "shape": frame_data.shape,
-                    "frame": frame_data,
-                    "error": None,
-                }
-                inst.close()
-            except Exception as e:
-                st.session_state.station_reading = {"error": repr(e)}
-        except Exception as e:
-            st.session_state.station_reading = {"error": repr(e)}
+            old_inst.close()
+        except Exception:
+            pass
+    inst_name = f"qdot_console_live_{uuid.uuid4().hex[:8]}"
+    st.session_state.qcodes_instrument = QArrayTwinInstrument(inst_name, config_path)
+    st.session_state.station_ood = _StationOOD()
+    st.session_state.station_history = []
+
+station_inst = st.session_state.qcodes_instrument
+
+if apply_override_clicked:
+    if ov_vx_on:
+        station_inst.vx_override(ov_vx_val)
+    if ov_vy_on:
+        station_inst.vy_override(ov_vy_val)
+
+if clear_override_clicked:
+    station_inst.clear_overrides()
+
+if station_clicked:
+    try:
+        station_inst.next_frame()
+        frame_data = np.asarray(station_inst.frame(), dtype=float)
+        anomalous = st.session_state.station_ood.update_and_check(frame_data)
+        reading = {
+            "frame_index": station_inst.frame_index(),
+            "vx": station_inst.vx(),
+            "vy": station_inst.vy(),
+            "shape": frame_data.shape,
+            "frame": frame_data,
+            "anomalous": anomalous,
+            "vx_override": station_inst.vx_override(),
+            "vy_override": station_inst.vy_override(),
+            "error": None,
+        }
+        st.session_state.station_reading = reading
+        st.session_state.station_history.append(reading)
+    except Exception as e:
+        st.session_state.station_reading = {"error": repr(e)}
 
 # ---------------------------------------------------------------------------
 # Main tabs
 # ---------------------------------------------------------------------------
-tab_overview, tab_supervisor, tab_station = st.tabs(
-    ["Staleness & throughput", "LLM supervisor", "Instrument station"]
+tab_overview, tab_live, tab_supervisor, tab_station = st.tabs(
+    ["Staleness & throughput", "Live run", "LLM supervisor", "Instrument station"]
 )
 
 with tab_overview:
@@ -343,6 +385,83 @@ with tab_overview:
                     yaxis_title="micro-batches",
                 )
                 st.plotly_chart(bar, use_container_width=True)
+
+with tab_live:
+    st.caption(
+        "LabVIEW-style live view: state renders as the run happens, not after it finishes. "
+        "Pick a mode in the sidebar's **Live run** section and click **Run live** \u2014 the chart "
+        "and metrics below update every few micro-batches while the pipeline is still executing."
+    )
+    if live_run_clicked:
+        chart_ph = st.empty()
+        metrics_ph = st.empty()
+        status_ph = st.empty()
+        t0 = time.time()
+        final_partial = None
+        try:
+            for partial in pipeline.run_live(live_mode, config_path, yield_every=3):
+                final_partial = partial
+                df = partial["df"]
+                elapsed = time.time() - t0
+
+                with metrics_ph.container():
+                    cols = st.columns(4)
+                    cols[0].metric("Frames logged", f"{len(df)}")
+                    tc = partial.get("tier_counts")
+                    if tc:
+                        cols[1].metric("FULL", tc.get("FULL", 0))
+                        cols[2].metric("CHEAP", tc.get("CHEAP", 0))
+                        cols[3].metric("SKIP", tc.get("SKIP", 0))
+                    else:
+                        cols[1].metric("Elapsed", f"{elapsed:.1f}s")
+
+                if not df.empty:
+                    completed = df[df["tier"] != "SKIP"] if "tier" in df else df
+                    skipped = df[df["tier"] == "SKIP"] if "tier" in df else df.iloc[0:0]
+                    live_fig = go.Figure()
+                    live_fig.add_trace(go.Scatter(
+                        x=completed["frame_index"], y=completed["wall_clock_lag"], mode="lines",
+                        line=dict(color=MODE_COLORS.get(live_mode, "#4c8bf5"), width=1.6),
+                        name=MODE_LABELS[live_mode],
+                    ))
+                    if not skipped.empty:
+                        live_fig.add_trace(go.Scatter(
+                            x=skipped["frame_index"], y=skipped["wall_clock_lag"], mode="markers",
+                            marker=dict(color="#e05252", size=6, symbol="x"), name="dropped (SKIP)",
+                        ))
+                    live_fig.update_yaxes(
+                        type="log", title_text="lag (s), log scale",
+                        tickvals=[0.001, 0.01, 0.1, 1], ticktext=["0.001", "0.01", "0.1", "1"],
+                    )
+                    live_fig.update_xaxes(title_text="frame index")
+                    live_fig.update_layout(
+                        template="plotly_white", height=420, showlegend=True,
+                        margin=dict(l=60, r=20, t=20, b=40),
+                    )
+                    chart_ph.plotly_chart(live_fig, use_container_width=True)
+
+                events = partial.get("events")
+                status_text = f"streaming \u2014 t={elapsed:.1f}s" if not partial["done"] else f"done \u2014 {elapsed:.1f}s total"
+                if events:
+                    ev = events[-1]
+                    status_text += f"  \u00b7  supervisor: {ev.reasoning}"
+                status_ph.caption(status_text)
+
+            if final_partial is not None and final_partial["done"]:
+                st.session_state.results[live_mode] = {
+                    "log": final_partial["log"], "tier_counts": final_partial["tier_counts"],
+                    "max_q": final_partial["max_q"], "events": final_partial["events"],
+                    "tier_compute_s": final_partial["tier_compute_s"], "wall_s": time.time() - t0,
+                    "config": config_path, "error": None,
+                }
+                st.success(
+                    f"Live run of {MODE_LABELS[live_mode]} complete \u2014 also saved to the "
+                    "Staleness & throughput tab like a normal run."
+                )
+        except Exception as e:
+            st.error(f"Live run failed: {e!r}")
+    else:
+        st.info("Pick a mode in the sidebar and click **Run live** to watch it stream in, frame by frame.")
 
 with tab_supervisor:
     r = st.session_state.results.get("batched_triage_llm")
