@@ -158,14 +158,15 @@ if run_clicked:
     if not selected_modes:
         st.warning("Select at least one mode before running.")
     for mode in selected_modes:
-        with st.spinner(f"Running {MODE_LABELS[mode]} against {config_path} \u2026"):
+        with st.spinner(f"Running {MODE_LABELS[mode]} against {config_path} …"):
             t0 = time.time()
             try:
-                log, tier_counts, max_q, events = pipeline.run_detailed(mode, config_path)
+                log, tier_counts, max_q, events, tier_compute_s = pipeline.run_detailed(mode, config_path)
                 wall_s = time.time() - t0
                 st.session_state.results[mode] = {
                     "log": log, "tier_counts": tier_counts, "max_q": max_q,
-                    "events": events, "wall_s": wall_s, "config": config_path,
+                    "events": events, "tier_compute_s": tier_compute_s, "wall_s": wall_s,
+                    "config": config_path,
                     "error": None,
                 }
             except Exception as e:
@@ -246,6 +247,12 @@ with tab_overview:
                             f"FULL {tc.get('FULL', 0)} \u00b7 CHEAP {tc.get('CHEAP', 0)} \u00b7 "
                             f"SKIP {tc.get('SKIP', 0)} \u00b7 max queue {r['max_q']}"
                         )
+                        tcs = r.get("tier_compute_s")
+                        if tcs:
+                            st.caption(
+                                f"compute time \u2014 FULL {tcs.get('FULL', 0.0):.3f}s \u00b7 "
+                                f"CHEAP {tcs.get('CHEAP', 0.0):.3f}s \u00b7 SKIP {tcs.get('SKIP', 0.0):.3f}s"
+                            )
 
             st.markdown("")
 
@@ -258,14 +265,30 @@ with tab_overview:
             )
             for i, mode in enumerate(ordered, start=1):
                 df = results[mode]["log"].to_dataframe()
+                completed = df[df["tier"] != "SKIP"]
+                skipped = df[df["tier"] == "SKIP"]
                 fig.add_trace(
                     go.Scatter(
-                        x=df["frame_index"], y=df["wall_clock_lag"], mode="lines",
+                        x=completed["frame_index"], y=completed["wall_clock_lag"], mode="lines",
                         line=dict(color=MODE_COLORS[mode], width=1.4),
                         name=MODE_LABELS[mode], showlegend=False,
                     ),
                     row=i, col=1,
                 )
+                if not skipped.empty:
+                    # Frames the triage agent dropped entirely -- never
+                    # actually estimated. Previously these were logged and
+                    # plotted identically to real completions, which is why
+                    # SKIP's effect was invisible on this chart. Shown as
+                    # distinct markers, not a continuation of the line.
+                    fig.add_trace(
+                        go.Scatter(
+                            x=skipped["frame_index"], y=skipped["wall_clock_lag"], mode="markers",
+                            marker=dict(color="#e05252", size=5, symbol="x"),
+                            name=f"{MODE_LABELS[mode]} (dropped, SKIP)", showlegend=False,
+                        ),
+                        row=i, col=1,
+                    )
             fig.update_yaxes(matches="y", type="log", title_text="lag (s), log scale")
             fig.update_xaxes(title_text="frame index", row=len(ordered), col=1)
             fig.update_layout(
@@ -290,6 +313,12 @@ with tab_overview:
                     "defaults \u2014 see the *LLM supervisor* tab for exactly what it changed and why.\n\n"
                     "Y-axis is **log-scaled and shared** across all four panels on purpose, so a real order-of-"
                     "magnitude difference is visible, without letting any one panel auto-scale to flatter itself."
+                    "- **Red X markers** mark frames the triage agent dropped entirely (SKIP tier) \u2014 "
+                    "never estimated, shown separately from the line so they're not mistaken for real "
+                    "completions. Note: on this patch size / ensemble size, CHEAP and SKIP's actual GPU "
+                    "compute savings are small in absolute terms (see the compute-time caption on each "
+                    "card above) \u2014 the story here is *shed load under backlog*, not *big per-frame "
+                    "speedup*.\n\n"
                 )
 
             # --- Tier routing bar chart, for modes that have it ----------
