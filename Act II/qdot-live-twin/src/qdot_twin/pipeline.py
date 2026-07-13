@@ -189,6 +189,149 @@ def _run_batched_loop(
     return log, tier_counts, max_queue_depth_seen, supervisor_events, tier_compute_s
 
 
+def _run_serial_live(config_path: str, yield_every: int):
+    """Generator twin of _run_serial() that yields partial StalenessLog
+    snapshots as frames complete, instead of blocking until the whole run
+    finishes. Serial has no tiers/queue/compute-time breakdown, so those
+    fields are always None here -- app.py's live panel treats that as
+    "not applicable to this mode," not an error.
+    """
+    log = StalenessLog()
+    count = 0
+    for frame in stream(config_path):
+        estimate(frame.data)
+        now = time.time()
+        log.record(frame_index=frame.frame_index, t=now, lag=now - frame.emitted_at, tier="FULL")
+        count += 1
+        if count % yield_every == 0:
+            yield {
+                "done": False, "df": log.to_dataframe(), "tier_counts": None,
+                "max_q": None, "tier_compute_s": None, "events": None,
+                "frames_seen": frame.frame_index + 1,
+            }
+    yield {
+        "done": True, "df": log.to_dataframe(), "tier_counts": None,
+        "max_q": None, "tier_compute_s": None, "events": None, "log": log,
+    }
+
+
+def run_live(mode: Literal["serial", "batched", "batched_triage", "batched_triage_llm"],
+             config_path: str, yield_every: int = 3):
+    """Generator variant of run_detailed() for live-updating UIs.
+
+    Yields a dict of partial state every `yield_every` completed
+    flushes/frames while the run is still in progress ("done": False),
+    then a final dict ("done": True) carrying the same fields
+    run_detailed() returns, plus the completed StalenessLog under "log".
+
+    This is additive: run()/run_detailed() and the loop they call
+    (_run_batched_loop) are completely untouched, so every existing mode
+    keeps behaving exactly as before. This exists purely to let app.py
+    render mid-run state -- the "live-updating console" requested
+    explicitly, instead of a spinner that unblocks only at the end.
+    """
+    if mode == "serial":
+        yield from _run_serial_live(config_path, yield_every)
+        return
+    if mode not in ("batched", "batched_triage", "batched_triage_llm"):
+        raise ValueError(f"unknown mode: {mode!r}")
+
+    use_triage = mode in ("batched_triage", "batched_triage_llm")
+    llm_supervised = mode == "batched_triage_llm"
+
+    log = StalenessLog()
+    buffer: list = []
+    last_flush_time = time.time()
+    last_full_update_time = time.time()
+    ood = RollingOODDetector()
+    recent_drift_flags: list[bool] = []
+    tier_counts = {"FULL": 0, "CHEAP": 0, "SKIP": 0}
+    tier_compute_s = {"FULL": 0.0, "CHEAP": 0.0, "SKIP": 0.0}
+    max_queue_depth_seen = 0
+
+    thresholds = history = supervisor = None
+    if llm_supervised:
+        from qdot_twin.agent.thresholds import TriageThresholds
+        from qdot_twin.agent.llm_supervisor import LLMSupervisor, RollingHistory
+        thresholds = TriageThresholds()
+        history = RollingHistory()
+        supervisor = LLMSupervisor(thresholds, history)
+        supervisor.start()
+
+    flush_count = 0
+    try:
+        for frame in stream(config_path):
+            buffer.append(frame)
+
+            anomalous = ood.update_and_check(frame.data)
+            recent_drift_flags.append(anomalous)
+            if len(recent_drift_flags) > RECENT_DRIFT_WINDOW:
+                recent_drift_flags.pop(0)
+
+            now = time.time()
+            if now - last_flush_time < FLUSH_INTERVAL_S:
+                continue
+            last_flush_time = now
+            if not buffer:
+                continue
+
+            max_queue_depth_seen = max(max_queue_depth_seen, len(buffer))
+
+            if use_triage:
+                queue_depth = len(buffer)
+                time_since_full = now - last_full_update_time
+                recent_drift_activity = any(recent_drift_flags)
+                tier = decide(queue_depth, time_since_full, recent_drift_activity, thresholds=thresholds)
+                if history is not None:
+                    history.record(queue_depth, time_since_full, recent_drift_activity, tier.name)
+            else:
+                tier = Tier.FULL
+
+            tier_counts[tier.name] += 1
+
+            t_compute_start = time.perf_counter()
+            if tier is Tier.FULL:
+                estimate_batch(_stack(buffer), device="cuda")
+                last_full_update_time = time.time()
+            elif tier is Tier.CHEAP:
+                estimate_batch(_stack(buffer), device="cuda", n_members=CHEAP_N_MEMBERS)
+            tier_compute_s[tier.name] += time.perf_counter() - t_compute_start
+
+            completion_time = time.time()
+            for f in buffer:
+                log.record(frame_index=f.frame_index, t=completion_time,
+                           lag=completion_time - f.emitted_at, tier=tier.name)
+            buffer = []
+            flush_count += 1
+
+            if flush_count % yield_every == 0:
+                yield {
+                    "done": False, "df": log.to_dataframe(), "tier_counts": dict(tier_counts),
+                    "max_q": max_queue_depth_seen, "tier_compute_s": dict(tier_compute_s),
+                    "events": list(supervisor.events) if supervisor is not None else None,
+                    "frames_seen": frame.frame_index + 1,
+                }
+
+        if buffer:
+            t_compute_start = time.perf_counter()
+            estimate_batch(_stack(buffer), device="cuda")
+            tier_compute_s["FULL"] += time.perf_counter() - t_compute_start
+            completion_time = time.time()
+            for f in buffer:
+                log.record(frame_index=f.frame_index, t=completion_time,
+                           lag=completion_time - f.emitted_at, tier="FULL")
+    finally:
+        if supervisor is not None:
+            supervisor.stop()
+
+    yield {
+        "done": True, "df": log.to_dataframe(), "tier_counts": tier_counts,
+        "max_q": max_queue_depth_seen, "tier_compute_s": tier_compute_s,
+        "events": supervisor.events if supervisor is not None else None,
+        "log": log,
+    }
+
+
 def run(mode: Literal["serial", "batched", "batched_triage", "batched_triage_llm"], config_path: str):
     if mode == "serial":
         return _run_serial(config_path)
