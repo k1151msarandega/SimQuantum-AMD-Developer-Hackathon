@@ -21,6 +21,7 @@ from typing import Optional
 import numpy as np
 from qcodes.instrument import Instrument
 
+from qdot_twin.stream.generator import VoltageOverride
 from qdot_twin.stream.generator import stream as qarray_stream
 
 
@@ -32,6 +33,14 @@ class QArrayTwinInstrument(Instrument):
     one frame -- this mirrors how a real QCoDeS driver's get() triggers a
     hardware read, except here the "hardware" is QArray's DotArray
     (see stream/generator.py's own docstring on why Rust, not JAX, backs it).
+
+    `vx_override`/`vy_override` are real, settable QCoDeS Parameters (not
+    just read-only telemetry): setting one writes into a shared
+    VoltageOverride that the underlying stream() checks on every frame
+    (see stream/generator.py's VoltageOverride docstring), so the very
+    next `.next_frame()` reflects it -- this is the bidirectional-control
+    half of the demo, not just a read pull. `clear_overrides()` returns to
+    following the scripted trajectory.
     """
 
     def __init__(self, name: str, config_path: str, **kwargs):
@@ -39,6 +48,22 @@ class QArrayTwinInstrument(Instrument):
         self._config_path = config_path
         self._gen = None
         self._last_frame = None
+        self._override = VoltageOverride()
+
+        self.add_parameter(
+            "vx_override",
+            label="Injected Vx override",
+            unit="V",
+            get_cmd=lambda: self._override.get()[0],
+            set_cmd=lambda v: self._override.set(vx=v),
+        )
+        self.add_parameter(
+            "vy_override",
+            label="Injected Vy override",
+            unit="V",
+            get_cmd=lambda: self._override.get()[1],
+            set_cmd=lambda v: self._override.set(vy=v),
+        )
 
         self.add_parameter(
             "frame_index",
@@ -71,9 +96,13 @@ class QArrayTwinInstrument(Instrument):
         instrument itself never blocks on QArray or the trajectory config.
         """
         if self._gen is None:
-            self._gen = qarray_stream(self._config_path)
+            self._gen = qarray_stream(self._config_path, override=self._override)
         try:
             self._last_frame = next(self._gen)
         except StopIteration:
             return None
         return self._last_frame.data
+
+    def clear_overrides(self) -> None:
+        """Stop injecting -- subsequent frames follow the scripted trajectory again."""
+        self._override.clear()
