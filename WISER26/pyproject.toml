@@ -1,0 +1,32 @@
+[project]
+name = "qdot-edu"
+version = "0.1.0"
+description = "CPU-runnable educational digital twin of a quantum dot device, with a drift-detection triage agent. WISER 2026 Education Challenge submission; forked from qdot-live-twin (Act II hackathon) -- see docs/PORTING_NOTES.md."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "torch",       # CPU wheel is fine and is what this port targets by default;
+                    # see README.md for an optional CPU-only install command
+                    # if pip pulls in an unwanted CUDA build on your platform.
+    "qarray",
+    "pyyaml",
+    "pandas",       # used directly by twin/staleness.py -- was an implicit/
+                    # transitive dep in the original pyproject.toml, made explicit here
+    "matplotlib",
+    "plotly",       # viz/potential_well.py's 3D surface rendering
+    "streamlit",
+    "qcodes",
+    "openai",       # only needed for the NOT-YET-PORTED "batched_triage_llm"
+                    # mode -- see docs/PORTING_NOTES.md. Safe to remove if that
+                    # mode is dropped from the submission.
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
