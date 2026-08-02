@@ -1,0 +1,16 @@
+# Scripted device trajectory for FAST interactive iteration (Streamlit app, live demo clicks).
+# Same shape as trajectory.yaml, scaled down so a run finishes in seconds.
+# Ported unchanged from qdot-live-twin (Act II).
+array_size: [1, 2]   # FIXED -- was [2, 2], never actually wired up; see trajectory.yaml's comment and docs/PORTING_NOTES.md
+n_frames: 300
+creep:
+  vx_range: [-5.0, 5.0]
+  vy_range: [-5.0, 5.0]
+  noise_std: 0.01
+jump:
+  at_frame: 45
+  vx_delta: 4.0
+  vy_delta: -4.0
+stream_rate_hz:
+  start: 5
+  end: 2000
