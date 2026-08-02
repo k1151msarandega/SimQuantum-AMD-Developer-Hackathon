@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+
+# Local env / secrets (e.g. any LLM-supervisor API keys, if that mode is kept)
+.env
+
+# Large local artifacts not meant for the repo
+*.mp4
+*.mov
