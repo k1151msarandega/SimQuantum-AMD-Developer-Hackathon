@@ -1,0 +1,27 @@
+# NEW config, specific to WISER26. Tuned for a CPU-only laptop audience:
+# a learner should be able to run the "serial" mode and clearly SEE it fall
+# behind (staleness climbing), then switch to "batched_triage" and see the
+# triage agent visibly intervene -- without needing 2000 frames/sec of CNN
+# inference on a CPU to make that happen.
+#
+# Rule of thumb used to pick these numbers: the end rate should be a small
+# multiple of what a CPU can plausibly sustain for the FULL tier (5-member
+# small CNN ensemble on ~32x32 patches), so "falls behind" is a real,
+# demonstrated fact, not a foregone conclusion baked into an absurd rate.
+# TODO once perception/ensemble.py is benchmarked on a target laptop CPU:
+# measure the actual FULL-tier frames/sec, then set `end` to roughly 3-5x
+# that, so the demo's "jump" event visibly stresses the system without
+# stalling it for minutes.
+array_size: [1, 2]   # FIXED -- was [2, 2], never actually wired up; see trajectory.yaml's comment and docs/PORTING_NOTES.md
+n_frames: 600
+creep:
+  vx_range: [-5.0, 5.0]
+  vy_range: [-5.0, 5.0]
+  noise_std: 0.01
+jump:
+  at_frame: 90
+  vx_delta: 4.0
+  vy_delta: -4.0
+stream_rate_hz:
+  start: 5
+  end: 60   # PLACEHOLDER -- benchmark and retune, see note above
