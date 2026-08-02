@@ -1,0 +1,34 @@
+# Scripted device trajectory for the full demo run.
+# Gradual creep for most of the run, one injected discrete jump partway through.
+# Ported unchanged from qdot-live-twin (Act II) -- this file has no GPU
+# dependency; QArray's Rust backend already runs on CPU. See
+# docs/PORTING_NOTES.md for what *did* need to change.
+array_size: [1, 2]          # (rows, cols) of the dot array QArray simulates.
+                             # FIXED from the original repo's [2, 2] -- that
+                             # value was never actually wired up (see
+                             # docs/PORTING_NOTES.md), and the model that WAS
+                             # actually simulated was always this 2-dot line.
+                             # [1, 2] is the value that matches the tested
+                             # dynamics; this field is now live (see
+                             # qdot_edu/model_params.py) -- changing it
+                             # changes the simulated array shape for real.
+n_frames: 2000               # total frames in the demo run
+creep:
+  vx_range: [-5.0, 5.0]      # volts, linear sweep over the full run
+  vy_range: [-5.0, 5.0]
+  noise_std: 0.01            # small per-frame jitter on top of the linear creep
+jump:
+  at_frame: 300
+  vx_delta: 4.0
+  vy_delta: -4.0
+stream_rate_hz:
+  start: 5                    # frames/sec at the start of the run
+  # NOTE (CPU port): the original 2000Hz end-rate was tuned against a
+  # GPU-batched estimator that could plausibly keep up. On CPU-only compute
+  # (perception/ensemble.py's small CNN, unbatched or batched-but-CPU), this
+  # rate may make the "serial" and even "batched" modes fall behind much
+  # earlier/harder than the original demo showed. That's not wrong -- it's
+  # actually a MORE honest illustration of why triage matters -- but if the
+  # staleness curves look uninterestingly saturated (everything maxed out),
+  # dial this down. See trajectory_cpu_edu.yaml for a pre-tuned starting point.
+  end: 2000
