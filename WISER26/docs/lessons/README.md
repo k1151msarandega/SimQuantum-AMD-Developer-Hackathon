@@ -1,13 +1,18 @@
 # Lesson map (planned notebook arc)
 
-NOT YET BUILT -- this is the plan, ported and adapted from qdot-live-twin's
-original 6-notebook progression. Each entry below becomes
-`notebooks/0N_*.ipynb`, and should open with the specific learning
-objective(s) from ../LEARNING_OBJECTIVES.md it targets.
+**Sequencing rule, corrected after discussion: `00_launch_app` is not
+optional orientation fluff -- it is the thing that PROVES the pipeline
+actually works.** None of `src/qdot_edu/` has been executed yet (see
+docs/PORTING_NOTES.md item 6) -- it's been ported and statically
+reviewed, not run. Building tutorial notebooks 01-07 on top of an
+unverified pipeline means any bug surfaces inside a teaching notebook
+instead of a clean smoke test, which is a much worse place to debug it.
+**Do not start 01-07 until `00_launch_app` has been run in Colab and
+reported back clean (or its failures fixed).**
 
 | # | Notebook | Targets objective(s) | Core idea |
 |---|---|---|---|
-| 00 | `start_here` | -- | Orientation: what a digital twin is, why this project exists, how to run the app. |
+| 00 | `launch_app` | -- | **Verification gate, run first.** Install, no-UI smoke test of the pipeline (serial mode, a few frames), then launch the Streamlit app via a tunnel. If this doesn't run clean, stop and fix the pipeline here -- don't proceed to 01. |
 | 01 | `sanity_check` | 2 | Drive QArray directly, plot a single charge-stability diagram, explain what you're looking at. |
 | 02 | `serial_baseline` | 3, 4 | Run the serial estimator against a live-rate stream; watch it fall behind; plot staleness over time. |
 | 03 | `batched` | 3, 4 | Same stream, batched estimator; compare staleness curves against 02. Discuss the CPU-vs-GPU batching gap. |
@@ -25,4 +30,4 @@ teaching material, not get sanded off.
 
 Each notebook should end with 1-2 short reflection/prediction prompts
 ("before running the next cell, guess what happens if...") rather than
-pure narration.
+pure narration. (00 is the exception -- it's a verification gate, not a lesson.)
