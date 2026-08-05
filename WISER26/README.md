@@ -75,31 +75,20 @@ Developed and run from Google Colab, not a local install -- there is no
 tested local `pip`/venv workflow for this repo (see
 [`docs/PORTING_NOTES.md`](docs/PORTING_NOTES.md)).
 
-**Notebooks (`notebooks/00`-`07`, once built -- see Status):** open
-directly in Colab (upload this repo or mount/clone it into a Colab
-session), then in the first cell:
-```python
-!pip install -e .
-```
-and run cells top to bottom.
-
-**The Streamlit app (`app.py`, once built -- see Status):** Colab can't
-serve Streamlit directly, so run it and expose it through a tunnel from a
-Colab cell, e.g.:
-```python
-!pip install -e . streamlit
-!streamlit run app.py &>/content/logs.txt &
-!npx --yes localtunnel --port 8501
-```
-then open the printed `localtunnel` URL -- that's the "hosting link" to
-share/open. (Any equivalent tunnel, e.g. `pyngrok`, works too -- this is
-just one concrete option pending an actual test run.)
-
-If `pip install torch` pulls in an unwanted CUDA build in your Colab
-runtime, install the CPU-only wheel explicitly first:
-```python
-!pip install torch --index-url https://download.pytorch.org/whl/cpu
-```
+**Use [`notebooks/00_launch_app.ipynb`](notebooks/00_launch_app.ipynb) --
+it is the actual, tested install/launch procedure** (install, import
+check, a no-UI pipeline smoke test, then the app via a tunnel). Don't
+reconstruct the install steps from scratch; a first real run already
+caught an install-ordering bug (see
+[`docs/PORTING_NOTES.md`](docs/PORTING_NOTES.md)'s "Resolved" section) --
+install torch and the project **in a single `pip install -e .` call**,
+not as two separate `pip install` commands. Installing torch separately
+first (e.g. via `pip install torch --index-url .../whl/cpu`, which an
+earlier version of this README suggested) collided with `qarray`'s exact
+`numpy==2.2.4` pin and silently left `scipy` uninstalled. Also **restart
+the Colab runtime after installing, before importing anything** --
+Colab keeps already-loaded numpy/scipy in memory, so a pip-level swap
+doesn't take effect until the process restarts.
 
 ## User guide
 (To be expanded once `app.py` and `notebooks/` exist -- see
