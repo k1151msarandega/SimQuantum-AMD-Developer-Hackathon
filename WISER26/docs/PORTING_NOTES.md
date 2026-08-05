@@ -59,15 +59,13 @@ depended on the AMD GPU:
 4. `viz/potential_well.py`'s TODO: check whether the installed QArray
    version exposes a real potential-query API to replace the Gaussian-well
    interpolation.
-5. Reproducibility: this repo is run from Colab notebooks, not local pip
-   installs (confirmed with the author) -- update README.md's install/run
-   instructions to match that actual workflow rather than a generic
-   `pip install -e .` + local `streamlit run`.
-6. Untested end to end: none of this code has actually been executed
-   (only statically reviewed) -- QArray's exact `do2d_open`/`DotArray` API
-   shape, and whether un-swept gates default to 0V during `do2d_open`
-   (see `model_params.py`'s verification caveat), are unverified against
-   a real installed QArray version.
+5. Untested end to end beyond install: a first real Colab run (via
+   `notebooks/00_launch_app.ipynb`) got as far as Step 1 (install) before
+   hitting the numpy/scipy bug now logged in "Resolved" below -- QArray's
+   exact `do2d_open`/`DotArray` API shape, and whether un-swept gates
+   default to 0V during `do2d_open` (see `model_params.py`'s verification
+   caveat), are STILL unverified; the import layer never got far enough
+   to reach that code. Re-run after the install fix to actually test it.
 
 ## Resolved
 - ~~De-duplicate capacitance matrices~~ -- done. `model_params.py` is now
@@ -86,3 +84,18 @@ depended on the AMD GPU:
   (both partial updates and the final dict), and `app.py` re-renders the
   potential-well figure on every yield using those real values plus the
   selected config's `array_size`.
+- ~~Colab install: separate torch + project install broke numpy/scipy~~ --
+  real bug, caught on the first actual Colab run (not a review finding).
+  `notebooks/00_launch_app.ipynb`'s Step 1 used to run
+  `pip install torch --index-url .../whl/cpu` followed by a separate
+  `pip install -e .`. Colab's preinstalled `numpy 2.2.4`/`scipy 1.16.3`
+  already satisfied `qarray`'s exact `numpy==2.2.4`/`scipy>=1.11` pins --
+  but the first pip call downgraded numpy to `1.26.4` for torch's sake and
+  uninstalled scipy as a side effect; the second call bumped numpy back up
+  for qarray but never restored scipy, leaving imports broken. Fixed by
+  combining both installs into one `pip install -e .` call (see the
+  notebook and README.md's Install & run section) so pip resolves the
+  whole dependency graph in one pass, plus an explicit "restart the Colab
+  runtime before importing" step (Colab caches already-loaded numpy/scipy
+  in memory across a pip-level swap). Not yet re-verified end to end after
+  this fix -- see "Open items" #5.
