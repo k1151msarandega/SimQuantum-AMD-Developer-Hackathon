@@ -54,18 +54,25 @@ depended on the AMD GPU:
 2. Re-ground `agent/triage.py`'s `STALE_THRESHOLD_S` (0.05s) -- came from
    the original GPU-batched run's measured worst-case lag; re-measure
    against the CPU `batch_estimator`.
-3. Verify `tier_counts` actually varies (triage doing something, not
-   always FULL or always SKIP) once real CPU timing is in place.
+3. `tier_counts` confirmed NOT varying on a real run: `batched_triage`
+   mode against `configs/trajectory_cpu_edu.yaml` returned
+   `{'FULL': 215, 'CHEAP': 0, 'SKIP': 0}` -- triage never once chose
+   anything but FULL. This was flagged as a risk before any code ran;
+   now confirmed with real data. Likely cause: `agent/triage.py`'s
+   `STALE_THRESHOLD_S`/queue-depth thresholds were tuned against the
+   original GPU-batched run's timing (see item 2) and may simply never
+   trigger under `trajectory_cpu_edu.yaml`'s current (still-placeholder,
+   see that file's own TODO) rate. Needs real re-tuning, not a guess.
 4. `viz/potential_well.py`'s TODO: check whether the installed QArray
    version exposes a real potential-query API to replace the Gaussian-well
    interpolation.
-5. Untested end to end beyond install: a first real Colab run (via
-   `notebooks/00_launch_app.ipynb`) got as far as Step 1 (install) before
-   hitting the numpy/scipy bug now logged in "Resolved" below -- QArray's
-   exact `do2d_open`/`DotArray` API shape, and whether un-swept gates
-   default to 0V during `do2d_open` (see `model_params.py`'s verification
-   caveat), are STILL unverified; the import layer never got far enough
-   to reach that code. Re-run after the install fix to actually test it.
+5. Untested end to end beyond a partial first run: `notebooks/00_launch_app.ipynb`
+   made it all the way to a real Streamlit app launch after the install
+   fixes above -- QArray's actual API (`do2d_open`, `DotArray`, gate
+   names) works as `stream/generator.py` assumed, which was the biggest
+   open unknown. Not yet confirmed: whether the potential-well panel
+   renders correctly once the tunnel-timing fix (see "Resolved") lands,
+   since the Plotly chart failed to load on the first run before that fix.
 
 ## Resolved
 - ~~De-duplicate capacitance matrices~~ -- done. `model_params.py` is now
@@ -99,3 +106,34 @@ depended on the AMD GPU:
   runtime before importing" step (Colab caches already-loaded numpy/scipy
   in memory across a pip-level swap). Not yet re-verified end to end after
   this fix -- see "Open items" #5.
+- ~~Even a clean install left `_center` ImportError from numpy/scipy~~ --
+  a second real bug: the numpy<->scipy churn from the fix above left
+  genuinely corrupted compiled files on disk (mixed-version artifacts pip
+  doesn't always fully clean up), which a runtime restart alone can't fix
+  since restart only clears in-memory state, not broken files on disk.
+  Fixed with a proper repair cell in the notebook: uninstall numpy/scipy
+  first (not just `--force-reinstall`, which can still reuse the same bad
+  cached wheel), then reinstall with `--no-cache-dir` to force a genuinely
+  fresh download.
+- ~~`%cd` from Step 0 silently lost after every runtime restart~~ -- third
+  real bug from the same first run: Colab resets cwd to `/content` on
+  restart, breaking every relative path in Steps 2-5 (root cause of why
+  Step 5's Streamlit app wasn't opening -- `streamlit run app.py` was
+  running from the wrong directory and never actually starting a server).
+  Fixed by persisting the resolved path with `%store` in Step 0 and adding
+  a "restore working directory" cell to run after every restart. Also
+  folded in the real GitHub URL for this repo now that it's been pushed:
+  `k1151msarandega/SimQuantum-AMD-Developer-Hackathon`.
+- ~~Blank page + `Failed to fetch dynamically imported module` for chart
+  widgets on first load~~ -- fourth real bug, and the good news attached
+  to it: it surfaced only AFTER the pipeline itself had already run
+  correctly end to end (`app.py` printed real `tier_counts`), so this was
+  purely a frontend-loading issue, not a pipeline bug. Root cause:
+  `notebooks/00_launch_app.ipynb`'s Step 5 used a fixed `sleep 3` before
+  starting the `localtunnel` tunnel, which wasn't reliably long enough for
+  Streamlit to finish starting -- the tunnel began routing traffic before
+  the server could serve its heavier widget JS bundles (Vega-Lite chart,
+  Plotly chart), while lighter widgets (selectboxes) eventually loaded
+  after manual refreshes. Fixed by polling `localhost:8501` until it
+  actually responds before starting the tunnel, instead of guessing a
+  fixed delay.
