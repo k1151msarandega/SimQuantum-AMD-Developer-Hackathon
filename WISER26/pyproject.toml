@@ -16,9 +16,9 @@ dependencies = [
     "plotly",       # viz/potential_well.py's 3D surface rendering
     "streamlit",
     "qcodes",
-    "openai",       # only needed for the NOT-YET-PORTED "batched_triage_llm"
-                    # mode -- see docs/PORTING_NOTES.md. Safe to remove if that
-                    # mode is dropped from the submission.
+    "openai",       # used by agent/llm_supervisor.py (LLM threshold
+                    # supervisor) via the Fireworks-compatible endpoint --
+                    # requires FIREWORKS_API_KEY at runtime, not install time.
 ]
 
 [project.optional-dependencies]
