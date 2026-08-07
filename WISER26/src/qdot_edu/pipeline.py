@@ -8,9 +8,10 @@ Modes:
                             and a real drift signal, with static rule-based
                             thresholds (agent/triage.py)
   "batched_triage_llm"  -- same as batched_triage, thresholds tuned by an LLM
-                            supervisor. NOT YET PORTED for WISER26 -- see
-                            docs/PORTING_NOTES.md. Raises ImportError until
-                            agent/llm_supervisor.py exists here.
+                            supervisor (agent/llm_supervisor.py). Requires
+                            FIREWORKS_API_KEY; without it the supervisor thread
+                            logs an error each tick and leaves thresholds at
+                            their defaults rather than failing the run.
 
 PORT NOTE: original pipeline.py hardcoded device="cuda" at every
 estimate_batch() call site. This version threads a `device` parameter
