@@ -19,13 +19,18 @@ to reason about throughput/latency tradeoffs in a live system.
 > piece is finished.**
 
 ## Status
-This README and the module-level scaffolding are in place; several pieces
-are explicitly marked TODO/not-yet-built in the code and in
-[`docs/PORTING_NOTES.md`](docs/PORTING_NOTES.md) and
-[`docs/lessons/README.md`](docs/lessons/README.md) -- most notably, the
-actual `notebooks/` lesson content and `app.py` Streamlit app don't exist
-yet. Treat this README as accurate about *intent and architecture*, not
-yet as a claim that the full learner experience is built and tested.
+`app.py` now has two tabs: **Live Console** (a continuously-running
+instrument session -- QCoDeS-backed Vx/Vy control, a live device feed, a
+real free-energy potential well, and live triage/staleness/drift
+diagnostics; see [`docs/PORTING_NOTES.md`](docs/PORTING_NOTES.md) for what
+that's built on) and **Mode comparison** (the original run-to-completion
+serial/batched/triage comparison). `agent/llm_supervisor.py` and
+`hardware/qcodes_adapter.py` are both now ported (see PORTING_NOTES).
+Still open: `notebooks/` lesson content, and the rate/threshold
+re-tuning tracked in PORTING_NOTES' "Open items" -- do that before
+assuming triage actually varies tier on the CPU-tuned configs. Treat this
+README as accurate about *intent and architecture*; check PORTING_NOTES'
+"Open items" before assuming every piece has been run end to end.
 
 ## Target audience
 Undergraduate or early-graduate students in physics, EE, or CS with
@@ -51,24 +56,33 @@ increasing rate. Learners first see a serial estimator fall behind
 (a real, measured effect -- not scripted), then a batched estimator do
 better, then a rule-based triage agent make explicit
 cost/correctness tradeoffs using real signals (queue depth, staleness,
-drift). A 3D potential-well visualization gives spatial intuition for
-what the abstract charge-stability numbers mean physically. Each stage is
-a working notebook that builds on the last, mirroring how the underlying
-engineering was actually developed -- see
+drift). A 3D potential-well visualization -- QArray's own
+`free_energy(n, vg)`, not a schematic stand-in -- gives spatial intuition
+for what the abstract charge-stability numbers mean physically: the
+electrostatic energy landscape the device's current charge configuration
+actually sits in. The Live Console (`app.py`'s first tab) puts all of this
+in one continuously-running instrument session, driven by a real
+QCoDeS-backed Vx/Vy instrument, instead of a series of one-shot runs. Each
+notebook stage is a working notebook that builds on the last, mirroring
+how the underlying engineering was actually developed -- see
 [`docs/lessons/README.md`](docs/lessons/README.md) for the full arc, and
 [`docs/PORTING_NOTES.md`](docs/PORTING_NOTES.md) for the engineering
 history this was built from.
 
 ## Tech stack
 - **[QArray](https://github.com/b-vanstraaten/qarray)** -- constant-capacitance quantum dot array simulator (Rust backend, CPU)
+- **QCoDeS** -- the instrument/control layer for the Live Console's Vx/Vy panel (`hardware/qcodes_adapter.py`)
 - **PyTorch** (CPU) -- the ensemble "perception" model that stands in for a real state-estimation workload
 - **NumPy / pandas** -- signal processing, staleness logging
-- **Streamlit** -- the interactive app (`app.py`, not yet built -- see Status)
+- **Streamlit** -- the interactive app (`app.py`)
 - **Plotly / Matplotlib** -- 2D charge-stability plots and the 3D potential-well surface
 - **Jupyter notebooks** -- the guided lesson arc (`notebooks/`, not yet built -- see Status)
 
 No GPU required anywhere in this repo -- see
-[`docs/PORTING_NOTES.md`](docs/PORTING_NOTES.md) for what that took.
+[`docs/PORTING_NOTES.md`](docs/PORTING_NOTES.md) for what that took. The
+LLM threshold supervisor is the one optional exception that needs network
+access (a Fireworks API key) -- everything else, including the rest of
+the Live Console, runs fully offline.
 
 ## Install & run
 Developed and run from Google Colab, not a local install -- there is no
@@ -90,26 +104,34 @@ the Colab runtime after installing, before importing anything** --
 Colab keeps already-loaded numpy/scipy in memory, so a pip-level swap
 doesn't take effect until the process restarts.
 
+To use the LLM threshold supervisor in the Live Console, set
+`FIREWORKS_API_KEY` before launching. Without it, the console still runs
+fully -- the supervisor thread just logs an error each tick and leaves
+thresholds at their defaults.
+
 ## User guide
-(To be expanded once `app.py` and `notebooks/` exist -- see
+(To be expanded once `notebooks/` exist -- see
 [`docs/lessons/README.md`](docs/lessons/README.md) for the planned
 notebook-by-notebook walkthrough in the meantime.) The intended flow: work
-through `notebooks/00`-`07` in order, then explore the same ideas
-interactively in the Streamlit app, which lets you switch between serial/
-batched/triage modes and tune triage thresholds live while watching
-staleness and the potential-well visualization respond.
+through `notebooks/00`-`07` in order, then open the Streamlit app.
+**Live Console** tab: click Start to power on a continuously-running
+session, adjust Vx/Vy live from the sidebar (or leave them on autopilot),
+and watch the device feed, potential well, and triage/staleness/drift
+diagnostics update in real time; Stop ends the session. **Mode
+comparison** tab: pick a mode and config and click Run for the
+side-by-side serial vs. batched vs. triage comparison, run to completion.
 
 ## Future improvements / scalability
 See [`docs/PORTING_NOTES.md`](docs/PORTING_NOTES.md)'s "Open items" for
-the concrete near-term TODOs (rate/threshold re-tuning, deciding the fate
-of the LLM-supervisor mode, and a real end-to-end test run since none of
-this has been executed yet -- only statically reviewed). Longer-term:
-add a real QArray potential-query API to `viz/potential_well.py` if one
-exists, replacing the current schematic interpolation; explore array
-shapes beyond a 2-dot line now that `array_size` is live (see
-`model_params.py`) -- e.g. a guided exercise on how triage dynamics
-change with array size; consider a "build-your-own-triage-policy"
-exercise as a capstone notebook.
+the concrete near-term TODOs -- rate/threshold re-tuning against real CPU
+timing (this also affects whether the Live Console's tier panel visibly
+changes tier), and a full end-to-end run of this session's additions
+(Live Console, ported QCoDeS adapter and LLM supervisor) since none of it
+has been executed in Streamlit yet, only reviewed against the actual
+installed QArray API. Longer-term: explore array shapes beyond a 2-dot
+line now that `array_size` is live (see `model_params.py`) -- e.g. a
+guided exercise on how triage dynamics change with array size; consider a
+"build-your-own-triage-policy" exercise as a capstone notebook.
 
 ## Credits & licensing
 See [`assets/CREDITS.md`](assets/CREDITS.md) for attribution on all
@@ -119,9 +141,13 @@ hackathon) rebuilt and extended per [`docs/PORTING_NOTES.md`](docs/PORTING_NOTES
 ## AI-assistance disclosure
 This repo was developed with AI coding-assistant support (Claude, via an
 MCP filesystem connection, working directly in this project's folder).
-Used for: porting the original GPU-specific code to run on CPU, scaffolding
-the repo structure and documentation, and drafting the new visualization
-and lab-theming modules. All design decisions, physics/engineering
-content, and final review remain the author's responsibility, per WISER's
-disclosure requirement -- expand this section with specifics as the build
-progresses.
+Used for: porting the original GPU-specific code to run on CPU,
+scaffolding the repo structure and documentation, drafting the
+visualization and lab-theming modules, porting `agent/llm_supervisor.py`
+and `hardware/qcodes_adapter.py` from the original hackathon repo, replacing
+the schematic potential-well visualization with one based on QArray's real
+`free_energy` output, and building the Live Console
+(`console/live_session.py`, `app.py`'s Live Console tab). All design
+decisions, physics/engineering content, and final review remain the
+author's responsibility, per WISER's disclosure requirement -- expand
+this section with specifics as the build progresses.
