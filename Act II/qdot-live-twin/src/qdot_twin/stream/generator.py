@@ -88,6 +88,48 @@ def _generate_patch(model: DotArray, vx: float, vy: float) -> np.ndarray:
     return charge_state_to_scalar(n)
 
 
+def build_model() -> DotArray:
+    """Public constructor for the same QArray model stream() builds internally.
+
+    Exposed so a second, independent reader -- the live console's
+    free-energy panel, in particular -- uses the identical capacitance
+    configuration rather than re-deriving its own copy and risking the two
+    silently drifting apart. stream() keeps building and owning its own
+    instance via _make_model(); this does not change that.
+    """
+    return _make_model()
+
+
+def free_energy_patch(model: DotArray, vx: float, vy: float) -> np.ndarray:
+    """The real electrostatic free-energy landscape around (vx, vy) -- the
+    potential well the device's current charge configuration actually sits
+    in, not a visual stand-in for one.
+
+    Uses QArray's own DotArray.free_energy(n, vg): first reads the ground-
+    state charge configuration n at the center point via ground_state_open
+    (this is real QArray physics, the same call do2d_open's stability-
+    diagram sweep is built on), then evaluates free_energy of that fixed
+    configuration against a (PATCH_RES, PATCH_RES) grid of nearby gate
+    voltages spanning the same +/-PATCH_WINDOW window _generate_patch uses,
+    so the two patches are directly comparable side by side.
+
+    Independent read, same device: this does not reuse or perturb the
+    stream()-owned model/generator in any way -- same as qcodes_adapter.py's
+    relationship to stream(), a second observer of the same QArray
+    DotArray configuration, not a second copy of the stream itself.
+    """
+    center_vg = np.array([vx, vy])
+    n_center = model.ground_state_open(center_vg)
+
+    xs = np.linspace(vx - PATCH_WINDOW, vx + PATCH_WINDOW, PATCH_RES)
+    ys = np.linspace(vy - PATCH_WINDOW, vy + PATCH_WINDOW, PATCH_RES)
+    x_grid, y_grid = np.meshgrid(xs, ys, indexing="xy")
+    vg_grid = np.stack([x_grid, y_grid], axis=-1)  # (PATCH_RES, PATCH_RES, n_gate)
+
+    fe = model.free_energy(n_center, vg_grid)  # (PATCH_RES, PATCH_RES, 1)
+    return np.asarray(fe)[..., 0]
+
+
 def stream(config_path: str, override: Optional[VoltageOverride] = None) -> Iterator[Frame]:
     """Yield Frames at the rate specified in the trajectory config.
 
