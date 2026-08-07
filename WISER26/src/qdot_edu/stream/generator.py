@@ -17,8 +17,14 @@ the config's `array_size` via qdot_edu.model_params (previously hardcoded
 to a fixed 2-dot pair) -- see docs/PORTING_NOTES.md item 5 and
 model_params.py's module docstring for the physical model and its
 verification caveat. This is also the same shared source the
-potential-well 3D visualization (viz/potential_well.py) uses, so the two
+potential-well visualization (viz/potential_well.py) uses, so the two
 can no longer silently drift apart.
+
+NEW (live console): build_model() below is a public constructor exposed
+so a second, independent reader of the SAME physical model -- the live
+console's potential-well panel, specifically -- can build an identical
+DotArray without re-deriving its own copy. stream() still owns and builds
+its own instance internally; this is purely additive.
 """
 import threading
 import time
@@ -56,9 +62,24 @@ class VoltageOverride:
             self._vx = None
             self._vy = None
 
+    def clear_vx(self) -> None:
+        """Release just Vx back to the scripted trajectory, leaving Vy
+        (if overridden) untouched. Needed because the live console lets a
+        learner release one axis to autopilot while still manually driving
+        the other -- clear() alone can only release both at once.
+        """
+        with self._lock:
+            self._vx = None
+
+    def clear_vy(self) -> None:
+        """Release just Vy back to the scripted trajectory -- see clear_vx()."""
+        with self._lock:
+            self._vy = None
+
     def get(self) -> tuple:
         with self._lock:
             return self._vx, self._vy
+
 
 # Capacitance matrices are now built per-run from the trajectory config's
 # array_size (see stream() below) via qdot_edu.model_params, not hardcoded
@@ -87,6 +108,19 @@ def _make_model(rows: int, cols: int) -> DotArray:
     return DotArray(Cdd=Cdd, Cgd=Cgd)
 
 
+def build_model(rows: int, cols: int) -> DotArray:
+    """Public constructor for the same QArray model stream() builds
+    internally, for a given array_size.
+
+    Exposed so a second, independent reader -- the live console's
+    potential-well panel, in particular -- uses the identical capacitance
+    configuration rather than re-deriving its own copy and risking the two
+    silently drifting apart. stream() keeps building and owning its own
+    instance via _make_model(); this does not change that.
+    """
+    return _make_model(rows, cols)
+
+
 def _generate_patch(model: DotArray, vx: float, vy: float, x_gate: str, y_gate: str) -> np.ndarray:
     """Generate a small stability-diagram patch centered at (vx, vy),
     sweeping the two named gates. Any other gates in the array are left
@@ -110,6 +144,11 @@ def stream(config_path: str, override: Optional[VoltageOverride] = None) -> Iter
     first two gates (P1, P2) are always the ones swept, regardless of
     array_size -- see model_params.py's verification caveat for arrays
     larger than a 2-dot line.
+
+    `override`, if given, is checked every frame: any (vx, vy) component
+    it currently holds replaces the scripted trajectory's value for that
+    component only. Default None means "follow the script," identical to
+    this function's original behavior.
     """
     cfg = load_trajectory_config(config_path)
     rows, cols = cfg.array_size
