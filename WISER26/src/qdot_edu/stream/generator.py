@@ -85,7 +85,15 @@ class VoltageOverride:
 # array_size (see stream() below) via qdot_edu.model_params, not hardcoded
 # here -- see docs/PORTING_NOTES.md item 5.
 
-PATCH_WINDOW = 0.5   # +/- volts around the current trajectory point
+PATCH_WINDOW = 1.0   # +/- volts around the current trajectory point
+# Widened from 0.5 -> 1.0 in the Live Console revision (learner feedback:
+# the device-feed patch showed too little context to be readable at a
+# glance). PATCH_RES is deliberately left unchanged below, not scaled up
+# with it -- do2d_open's compute cost is ~PATCH_RES^2 regardless of
+# window size, so widening the window alone costs nothing extra per frame
+# and does not change the pipeline's timing/falling-behind behavior that
+# the serial-vs-batched-vs-triage story depends on. The tradeoff is fewer
+# pixels per volt (coarser transition boundaries), not slower frames.
 PATCH_RES = 32        # patch resolution; small so single-frame Rust generation stays fast
 
 
