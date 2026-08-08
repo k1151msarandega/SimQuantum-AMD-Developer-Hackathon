@@ -31,18 +31,35 @@ same constant-capacitance approximation the rest of this repo uses, not a
 full electrostatics solve. Say so in learner-facing material.
 
 Only the array's first two gates (P1, P2) are ever swept here, matching
-stream/generator.py's do2d_open sweep and the SAME +/-PATCH_WINDOW window,
-so the stability-diagram patch and this potential-well patch are directly,
-spatially comparable side by side. Any additional gates beyond the first
-two are held at 0V for both the sweep grid and the reference charge
-configuration -- see model_params.py's verification caveat on what QArray
-assumes for un-swept gates.
+stream/generator.py's do2d_open sweep. Any additional gates beyond the
+first two are held at 0V for both the sweep grid and the reference
+charge configuration -- see model_params.py's verification caveat on
+what QArray assumes for un-swept gates.
+
+WINDOW SIZE, and why it's no longer tied to generator.PATCH_WINDOW: this
+module originally reused stream/generator.py's +/-PATCH_WINDOW so the two
+panels were directly, spatially comparable side by side. In practice that
+made the well look like a flat tilted sheet almost everywhere except very
+early in a trajectory -- verified numerically, not just by eyeballing a
+screenshot: Cdd_inv for this repo's 2-dot matrices has eigenvalues
+[-10, +10], i.e. free_energy is a SADDLE in (Vx, Vy), not a bowl, and its
+curvature magnitude over a window is roughly fixed while the surface's
+local linear gradient grows with distance from the saddle center -- so a
+small fixed window centered far from that point is dominated by the
+gradient and looks nearly planar (measured ~1.7% deviation from a planar
+fit at Vx~9V with a +/-0.5V window, vs ~10% at +/-3V, same point -- see
+docs/PORTING_NOTES.md). WELL_WINDOW below trades exact side-by-side
+comparability with the device-feed patch for the well actually being
+readable most of the time. It is still a real, exact evaluation of
+free_energy over that wider window, not an approximation -- just a wider
+one than the device-feed patch uses.
 """
 import numpy as np
 
 from qdot_edu import model_params
-from qdot_edu.stream.generator import PATCH_WINDOW, build_model
+from qdot_edu.stream.generator import build_model
 
+WELL_WINDOW = 3.0  # +/- volts; deliberately wider than generator.PATCH_WINDOW -- see module docstring
 GRID_RES = 40  # surface resolution; cheap linear algebra, not GPU/CNN work -- fine to keep live-interactive
 
 
@@ -55,10 +72,10 @@ def potential_surface(
     Z = model.free_energy(n_center, vg_grid): the free energy of the
     ground-state charge configuration AT (vx, vy) (n_center, from
     QArray's own ground_state_open), evaluated across a grid of nearby
-    (Vx, Vy) points spanning the same +/-PATCH_WINDOW window
-    stream/generator.py's stability-diagram patch uses. All gates beyond
-    the first two (P1, P2) are held at 0V in both n_center and the sweep
-    grid, matching stream()'s own sweep.
+    (Vx, Vy) points spanning +/-WELL_WINDOW (see module docstring for why
+    this is wider than, and independent from, generator.PATCH_WINDOW).
+    All gates beyond the first two (P1, P2) are held at 0V in both
+    n_center and the sweep grid, matching stream()'s own sweep.
 
     `model`, if given, reuses a caller-provided DotArray (e.g. the live
     console keeps one alive across frames rather than rebuilding it every
@@ -68,8 +85,8 @@ def potential_surface(
         model = build_model(rows, cols)
 
     n_gate = rows * cols
-    xs = np.linspace(vx - PATCH_WINDOW, vx + PATCH_WINDOW, GRID_RES)
-    ys = np.linspace(vy - PATCH_WINDOW, vy + PATCH_WINDOW, GRID_RES)
+    xs = np.linspace(vx - WELL_WINDOW, vx + WELL_WINDOW, GRID_RES)
+    ys = np.linspace(vy - WELL_WINDOW, vy + WELL_WINDOW, GRID_RES)
     x_grid, y_grid = np.meshgrid(xs, ys, indexing="xy")
 
     vg_grid = np.zeros(x_grid.shape + (n_gate,))
