@@ -13,6 +13,19 @@ knowledge of quantum dot devices, digital twins, or systems/control
 concepts like triage or backpressure. Also usable by a slightly broader
 "quantum-curious, comfortable with code" audience.
 
+## Why this counts as quantum computing education
+This lesson's course concept is quantum hardware calibration and
+control, not a gate-model algorithm. Gate-defined semiconductor quantum
+dot arrays are one of the real, actively-pursued qubit modalities
+(alongside superconducting transmons, trapped ions, and others) --
+reading charge-stability diagrams and keeping a live device-
+characterization pipeline current is real, unglamorous engineering work
+that has to happen before any algorithm can run on this hardware at all.
+This lesson teaches that layer of the stack: the physical model
+underneath a real qubit platform, and the systems/control intuition
+needed to operate it, using a real (if pedagogically-scaled) simulation
+rather than an algorithmic circuit.
+
 ## Learning objectives
 By the end of the lesson arc, a learner should be able to:
 
@@ -38,10 +51,13 @@ By the end of the lesson arc, a learner should be able to:
    statistics, and distinguish a gradual, legitimate change (slow gate
    drift) from a sudden discrete event (a jump) using the same detector.
 7. **Connect an electrostatic energy model to spatial intuition**: read a
-   3D confinement-potential surface and explain, qualitatively, when an
-   electron is more likely to be trapped -- while correctly stating what
-   that visualization is (a pedagogical interpolation) and is not (a full
-   Poisson-equation solve).
+   3D confinement-potential surface -- QArray's own free_energy(n, Vg)
+   output, evaluated over a voltage grid, not a schematic interpolation
+   -- and explain, qualitatively, when a charge configuration is more
+   likely to be stable there, while correctly stating what that
+   visualization is (the real output of the constant-capacitance
+   approximation) and is not (a full Poisson-equation solve, or a
+   calibrated model of any specific fabricated device).
 8. **Critically evaluate a simulation's own assumptions and limitations**
    -- modeled directly on this codebase's own practice of documenting
    design tradeoffs and open TODOs rather than hiding them.
