@@ -63,6 +63,7 @@ class LiveSnapshot:
     half-updated value, without needing its own lock.
     """
     running: bool = False
+    paused: bool = False
     done: bool = False
     error: Optional[str] = None
     status: str = "idle"
@@ -125,6 +126,7 @@ class LiveConsoleSession:
         self._lock = threading.Lock()
         self._state = LiveSnapshot(n_frames_total=cfg.n_frames)
         self._stop_event = threading.Event()
+        self._pause_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._supervisor = None
 
@@ -137,6 +139,7 @@ class LiveConsoleSession:
         if self.is_running():
             return
         self._stop_event.clear()
+        self._pause_event.clear()
         with self._lock:
             self._state = LiveSnapshot(
                 n_frames_total=self._state.n_frames_total, running=True, status="starting",
@@ -158,6 +161,28 @@ class LiveConsoleSession:
             self._state.running = False
             if self._state.status not in ("trajectory complete", "error"):
                 self._state.status = "stopped"
+
+    def pause(self) -> None:
+        """Halt the background loop's frame consumption without tearing
+        the session down -- unlike stop(), the thread stays alive and all
+        accumulated state (staleness log, tier tally, thresholds) is
+        preserved, so resume() picks up exactly where this left off.
+
+        Because stream()'s pacing sleep happens INSIDE the generator at
+        call time (not on a fixed wall-clock schedule), simply not calling
+        next_frame() for a while has no drift/catch-up side effect --
+        the stream is exactly as far along when you resume as it was when
+        you paused, just later in wall-clock time.
+        """
+        self._pause_event.set()
+        self._patch(paused=True, status="paused")
+
+    def resume(self) -> None:
+        """Undo pause() -- the background loop resumes pulling frames on
+        its very next iteration.
+        """
+        self._pause_event.clear()
+        self._patch(paused=False, status="running")
 
     def set_vx(self, vx: Optional[float]) -> None:
         """Inject a manual Vx, live, whether or not the session is running.
@@ -208,6 +233,15 @@ class LiveConsoleSession:
 
         try:
             while not self._stop_event.is_set():
+                if self._pause_event.is_set():
+                    # Deliberately just sleep-and-recheck rather than
+                    # wait()-on-an-Event -- this loop also needs to wake up
+                    # promptly on stop_event, and a plain poll here is
+                    # simpler than juggling two Events in one wait call for
+                    # a 100ms-granularity control action.
+                    time.sleep(0.1)
+                    continue
+
                 data = self.station.next_frame()
                 if data is None:
                     self._patch(running=False, done=True, status="trajectory complete")
