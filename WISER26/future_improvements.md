@@ -1,0 +1,17 @@
+## Future improvements / scalability
+
+### Near-term (already scoped, not yet done)
+- **Re-tune triage against real CPU timing.** `STALE_THRESHOLD_S` and the queue-depth thresholds were carried over from the original GPU-batched run's measured timing; a real CPU benchmark is needed before the triage tier ever visibly leaves FULL on the CPU-tuned configs (see `docs/PORTING_NOTES.md`'s "Open items").
+- **Framework migration to [Solara](https://solara.dev/)**, in progress as of this submission. Streamlit's request/response model needed a polling workaround (`st.fragment(run_every=...)`) to drive the Live Console's continuous updates; Solara's reactive model lets a background thread push state directly, which is a more natural fit and removes a source of UI fragility observed during development (occasional failed asset loads under Streamlit + a Colab `localtunnel` connection specifically). Retaining the Streamlit version as a tested fallback until the Solara port has run end-to-end against the real dependency stack.
+- **Hosting off Colab+tunnel entirely** -- Streamlit Community Cloud or a Hugging Face Space, both free, would remove the tunnel-fragility class of issue outright and give a stable public URL instead of a per-session tunnel link. Both are viable today (a `requirements.txt` is already included for this); not yet done only for lack of time.
+
+### Educational content
+- **Notebooks 01-07**: the guided arc `docs/lessons/README.md` lays out, walking through each learning objective in order using the same running example the app demonstrates live.
+- **A "build-your-own-triage-policy" capstone notebook**, where a learner writes and tests their own multi-signal rule against the same staleness/drift signals the built-in agent uses -- directly exercises learning objective #5 (design and critique a triage policy) as a hands-on exercise rather than only an observation.
+- **Automated assessments** (WISER's optional advanced task): short adaptive checks after each notebook -- e.g. "given this queue-depth/staleness trace, what tier should trigger next" -- auto-graded against the real `agent/triage.py` logic rather than a hand-written answer key, so the check stays correct even if thresholds are re-tuned later.
+- **Multilingual content** (also an optional advanced task): the notebook narrative text is the only part that would need translation -- all code, config, and the app itself are language-independent already.
+
+### Scalability
+- **Array shapes beyond a 2-dot line.** `array_size` (rows x cols) is already a live, working config value via `model_params.py` -- extending the guided exercises to larger arrays would let learners see how triage dynamics and drift detection change as the system gets more complex, without any new simulation code.
+- **Adoption by educators with minimal setup** (WISER's optional advanced task): the whole stack is CPU-only and open-source with no GPU or paid-API dependency required for the core lesson (the LLM supervisor is opt-in and degrades gracefully without a key). A Binder or `nbgitpuller` launch link, once the notebook arc is complete, would let an instructor point students at a zero-install link instead of a local setup.
+- **Community contribution path**: `docs/PORTING_NOTES.md`'s practice of documenting every real bug found and its fix, not just claiming things work, is meant to double as a model for contributors -- the same discipline this project asks learners to practice in objective #8.
