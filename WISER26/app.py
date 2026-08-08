@@ -87,9 +87,19 @@ with tab_live:
         session: LiveConsoleSession | None = st.session_state.live_session
         is_running = session is not None and session.is_running()
 
+        is_paused = is_running and session.snapshot().paused
+
         c1, c2 = st.columns(2)
         start_clicked = c1.button("\u25B6 Start", type="primary", use_container_width=True, disabled=is_running)
         stop_clicked = c2.button("\u25A0 Stop", use_container_width=True, disabled=not is_running)
+
+        c3, c4 = st.columns(2)
+        pause_clicked = c3.button(
+            "\u23F8 Pause", use_container_width=True, disabled=not is_running or is_paused,
+        )
+        resume_clicked = c4.button(
+            "\u25B6 Resume", use_container_width=True, disabled=not is_running or not is_paused,
+        )
 
         if start_clicked:
             st.session_state.live_session = LiveConsoleSession(
@@ -99,6 +109,12 @@ with tab_live:
             st.rerun()
         if stop_clicked:
             session.stop()
+            st.rerun()
+        if pause_clicked:
+            session.pause()
+            st.rerun()
+        if resume_clicked:
+            session.resume()
             st.rerun()
 
         st.markdown("---")
@@ -165,6 +181,8 @@ with tab_live:
                 )
             if snap.error:
                 st.error(f"Session error: {snap.error}")
+            if snap.paused:
+                st.info("Paused -- frame consumption is halted; nothing is lost. Click **Resume** to continue.")
             if snap.status == "trajectory complete":
                 st.success("Trajectory complete -- the scripted run finished. Click Start for a fresh session.")
 
@@ -244,9 +262,30 @@ with tab_live:
             if snap.llm_supervised and snap.supervisor_events:
                 with st.expander(f"Supervisor log ({len(snap.supervisor_events)} updates)"):
                     t0 = snap.supervisor_events[0].t
-                    for ev in snap.supervisor_events[-20:]:
+                    # Display-only collapsing of consecutive identical
+                    # reasoning strings (e.g. the same FIREWORKS_API_KEY
+                    # error firing every tick) into one line with a
+                    # repeat count and a time range -- snap.supervisor_events
+                    # itself is untouched, this is purely to keep a long
+                    # run's log readable instead of dozens of copies of
+                    # the same line.
+                    collapsed = []  # list of [first_ev, last_ev, count]
+                    for ev in snap.supervisor_events[-200:]:
+                        if collapsed and collapsed[-1][0].reasoning == ev.reasoning:
+                            collapsed[-1][1] = ev
+                            collapsed[-1][2] += 1
+                        else:
+                            collapsed.append([ev, ev, 1])
+
+                    for first_ev, last_ev, count in collapsed[-20:]:
+                        span = (
+                            f"t={first_ev.t - t0:.2f}s"
+                            if count == 1
+                            else f"t={first_ev.t - t0:.2f}s\u2013{last_ev.t - t0:.2f}s ({count}\u00d7)"
+                        )
+                        ev = last_ev  # show the most recent threshold values in the collapsed run
                         st.caption(
-                            f"t={ev.t - t0:.2f}s -- {ev.reasoning}  "
+                            f"{span} -- {ev.reasoning}  "
                             f"(cheap {ev.old[0]}\u2192{ev.new[0]}, skip {ev.old[1]}\u2192{ev.new[1]}, "
                             f"stale {ev.old[2]:.3f}\u2192{ev.new[2]:.3f})"
                         )
