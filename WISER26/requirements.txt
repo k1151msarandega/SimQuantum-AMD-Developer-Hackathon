@@ -1,0 +1,23 @@
+# For Streamlit Community Cloud and Hugging Face Spaces (Streamlit SDK).
+#
+# Both platforms want a plain requirements.txt, not pyproject.toml --
+# Community Cloud in particular assumes any pyproject.toml it finds is
+# Poetry-formatted, which this repo's isn't (plain setuptools), so it
+# would misparse it. This file is a plain mirror of pyproject.toml's
+# [project.dependencies] -- keep the two in sync by hand if either
+# changes; there is no single source of truth between them.
+#
+# Unpinned, same as pyproject.toml -- see docs/PORTING_NOTES.md's Colab
+# install notes for why (letting pip resolve the whole graph in one pass
+# avoided a real numpy/scipy conflict there; the same reasoning applies
+# here).
+numpy
+torch
+qarray
+pyyaml
+matplotlib
+openai
+qcodes
+streamlit
+plotly
+pandas
